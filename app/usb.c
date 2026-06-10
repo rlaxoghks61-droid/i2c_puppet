@@ -162,7 +162,10 @@ nav_acc_y = 0;
 nav_block_until_ms = now_ms + 600;
 
 		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
-		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, empty);
+
+sleep_ms(20);
+
+tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, empty);
 
 		return;
 	}
