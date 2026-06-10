@@ -147,8 +147,11 @@ static struct key_callback key_callback = { .func = key_cb };
 static void touch_cb(int8_t x, int8_t y)
 {
 	if (keyboard_get_capslock() && tud_hid_n_ready(USB_ITF_KEYBOARD))
-	{
-		uint8_t keycode[6] = {0};
+{
+	if (tud_hid_n_ready(USB_ITF_MOUSE))
+		tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, 0x00, 0, 0, 0, 0);
+
+	uint8_t keycode[6] = {0};
 
 		uint32_t now_ms = to_ms_since_boot(get_absolute_time());
 
