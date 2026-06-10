@@ -7,6 +7,7 @@
 
 #include <hardware/irq.h>
 #include <pico/mutex.h>
+#include <pico/stdlib.h>
 #include <tusb.h>
 
 #define USB_LOW_PRIORITY_IRQ	31
@@ -24,8 +25,7 @@ static struct
 
 static int16_t nav_acc_x = 0;
 static int16_t nav_acc_y = 0;
-static bool nav_sent = false;
-static uint32_t last_touch_time_ms = 0;
+static uint32_t nav_block_until_ms = 0;
 
 // TODO: What about Ctrl?
 // TODO: What should L1, L2, R1, R2 do
@@ -140,18 +140,9 @@ static void touch_cb(int8_t x, int8_t y)
 
 		uint32_t now_ms = to_ms_since_boot(get_absolute_time());
 
-		if ((now_ms - last_touch_time_ms) > 250)
-		{
-			nav_sent = false;
-			nav_acc_x = 0;
-			nav_acc_y = 0;
-		}
-
-		last_touch_time_ms = now_ms;
-
-		if (nav_sent)
-			return;
-
+if (now_ms < nav_block_until_ms)
+	return;
+		
 		nav_acc_x += x;
 		nav_acc_y += y;
 
@@ -166,9 +157,9 @@ static void touch_cb(int8_t x, int8_t y)
 		else
 			return;
 
-		nav_sent = true;
 		nav_acc_x = 0;
-		nav_acc_y = 0;
+nav_acc_y = 0;
+nav_block_until_ms = now_ms + 600;
 
 		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
 		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, empty);
@@ -176,9 +167,9 @@ static void touch_cb(int8_t x, int8_t y)
 		return;
 	}
 
-	nav_sent = false;
 	nav_acc_x = 0;
 	nav_acc_y = 0;
+	nav_block_until_ms = 0;
 
 	if (!tud_hid_n_ready(USB_ITF_MOUSE) || !reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON))
 		return;
