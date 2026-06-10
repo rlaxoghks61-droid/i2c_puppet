@@ -22,8 +22,6 @@ static struct
 	uint8_t write_len;
 } self;
 
-static bool scroll_lock = false;
-
 // TODO: What about Ctrl?
 // TODO: What should L1, L2, R1, R2 do
 // TODO: Should touch send arrow keys as an option?
@@ -135,15 +133,6 @@ static void touch_cb(int8_t x, int8_t y)
 		uint8_t keycode[6] = {0};
 		uint8_t empty[6] = {0};
 
-		if ((x == 0) && (y == 0))
-		{
-			scroll_lock = false;
-			return;
-		}
-
-		if (scroll_lock)
-			return;
-
 		if (y < -2)
 			keycode[0] = HID_KEY_ARROW_UP;
 		else if (y > 2)
@@ -154,8 +143,6 @@ static void touch_cb(int8_t x, int8_t y)
 			keycode[0] = HID_KEY_ARROW_RIGHT;
 		else
 			return;
-
-		scroll_lock = true;
 
 		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
 		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, empty);
