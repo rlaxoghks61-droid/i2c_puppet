@@ -38,7 +38,7 @@ static void low_priority_worker_irq(void)
 	if (mutex_try_enter(&self.mutex, NULL)) {
 		tud_task();
 
-		if (nav_release_pending && tud_hid_n_ready(USB_ITF_KEYBOARD)) {
+		if (nav_release_pending) {
 			uint32_t now_ms = to_ms_since_boot(get_absolute_time());
 
 			if (now_ms >= nav_release_time_ms) {
