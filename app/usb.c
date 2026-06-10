@@ -70,13 +70,13 @@ if (tud_hid_n_ready(USB_ITF_CONSUMER))
     if (state == KEY_STATE_PRESSED)
     {
         if (key == KEY_BTN_LEFT1)
-            consumer_key = HID_USAGE_CONSUMER_AC_CALL;
+            consumer_key = 0x00B6; // Scan Next Track, 임시 통화 테스트용
 
         else if (key == KEY_BTN_LEFT2)
             consumer_key = HID_USAGE_CONSUMER_AC_HOME;
 
         else if (key == KEY_BTN_RIGHT2)
-            consumer_key = HID_USAGE_CONSUMER_AC_END_CALL;
+            consumer_key = 0x00B5; // Scan Previous Track, 임시 종료 테스트용
     }
 
     tud_hid_n_report(
