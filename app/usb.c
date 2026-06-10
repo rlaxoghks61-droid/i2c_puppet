@@ -26,6 +26,8 @@ static struct
 static int16_t nav_acc_x = 0;
 static int16_t nav_acc_y = 0;
 static uint32_t nav_block_until_ms = 0;
+static bool nav_release_pending = false;
+static uint32_t nav_release_time_ms = 0;
 
 // TODO: What about Ctrl?
 // TODO: What should L1, L2, R1, R2 do
@@ -35,6 +37,17 @@ static void low_priority_worker_irq(void)
 {
 	if (mutex_try_enter(&self.mutex, NULL)) {
 		tud_task();
+
+		if (nav_release_pending && tud_hid_n_ready(USB_ITF_KEYBOARD)) {
+			uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+
+			if (now_ms >= nav_release_time_ms) {
+				uint8_t empty[6] = {0};
+
+				tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, empty);
+				nav_release_pending = false;
+			}
+		}
 
 		mutex_exit(&self.mutex);
 	}
@@ -136,7 +149,6 @@ static void touch_cb(int8_t x, int8_t y)
 	if (keyboard_get_capslock() && tud_hid_n_ready(USB_ITF_KEYBOARD))
 	{
 		uint8_t keycode[6] = {0};
-		uint8_t empty[6] = {0};
 
 		uint32_t now_ms = to_ms_since_boot(get_absolute_time());
 
@@ -158,11 +170,13 @@ if (now_ms < nav_block_until_ms)
 			return;
 
 		nav_acc_x = 0;
-nav_acc_y = 0;
-nav_block_until_ms = now_ms + 600;
+		nav_acc_y = 0;
+		nav_block_until_ms = now_ms + 600;
 
 		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
-		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, empty);
+
+		nav_release_pending = true;
+		nav_release_time_ms = now_ms + 30;
 
 		return;
 	}
