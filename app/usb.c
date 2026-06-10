@@ -22,7 +22,8 @@ static struct
 	uint8_t write_len;
 } self;
 
-static uint32_t last_nav_time_ms = 0;
+static int16_t nav_acc_x = 0;
+static int16_t nav_acc_y = 0;
 
 // TODO: What about Ctrl?
 // TODO: What should L1, L2, R1, R2 do
@@ -135,29 +136,31 @@ static void touch_cb(int8_t x, int8_t y)
 		uint8_t keycode[6] = {0};
 		uint8_t empty[6] = {0};
 
-		uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+		nav_acc_x += x;
+		nav_acc_y += y;
 
-		if ((now_ms - last_nav_time_ms) < 150)
-			return;
-
-		if (y < -2)
+		if (nav_acc_y <= -12)
 			keycode[0] = HID_KEY_ARROW_UP;
-		else if (y > 2)
+		else if (nav_acc_y >= 12)
 			keycode[0] = HID_KEY_ARROW_DOWN;
-		else if (x < -2)
+		else if (nav_acc_x <= -12)
 			keycode[0] = HID_KEY_ARROW_LEFT;
-		else if (x > 2)
+		else if (nav_acc_x >= 12)
 			keycode[0] = HID_KEY_ARROW_RIGHT;
 		else
 			return;
 
-		last_nav_time_ms = now_ms;
+		nav_acc_x = 0;
+		nav_acc_y = 0;
 
 		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
 		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, empty);
 
 		return;
 	}
+
+	nav_acc_x = 0;
+	nav_acc_y = 0;
 
 	if (!tud_hid_n_ready(USB_ITF_MOUSE) || !reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON))
 		return;
