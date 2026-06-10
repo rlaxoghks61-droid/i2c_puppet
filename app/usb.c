@@ -61,11 +61,31 @@ static void key_cb(char key, enum key_state state)
 		conv_table[KEY_JOY_DOWN][1]		= HID_KEY_ARROW_DOWN;
 		conv_table[KEY_JOY_LEFT][1]		= HID_KEY_ARROW_LEFT;
 		conv_table[KEY_JOY_RIGHT][1]	= HID_KEY_ARROW_RIGHT;
-		conv_table[KEY_BTN_LEFT1][1]  = HID_KEY_F1;
-		conv_table[KEY_BTN_LEFT2][1]  = HID_KEY_HOME;
 		conv_table[KEY_BTN_RIGHT1][1] = HID_KEY_ESCAPE;
-		conv_table[KEY_BTN_RIGHT2][1] = HID_KEY_F2;
+		
+if (tud_hid_n_ready(USB_ITF_CONSUMER))
+{
+    uint16_t consumer_key = 0;
 
+    if (state == KEY_STATE_PRESSED)
+    {
+        if (key == KEY_BTN_LEFT1)
+            consumer_key = HID_USAGE_CONSUMER_AC_CALL;
+
+        else if (key == KEY_BTN_LEFT2)
+            consumer_key = HID_USAGE_CONSUMER_AC_HOME;
+
+        else if (key == KEY_BTN_RIGHT2)
+            consumer_key = HID_USAGE_CONSUMER_AC_END_CALL;
+    }
+
+    tud_hid_n_report(
+        USB_ITF_CONSUMER,
+        0,
+        &consumer_key,
+        sizeof(consumer_key)
+    );
+}
 		uint8_t keycode[6] = { 0 };
 		uint8_t modifier   = 0;
 
