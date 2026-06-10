@@ -61,7 +61,7 @@ static void key_cb(char key, enum key_state state)
 		conv_table[KEY_JOY_DOWN][1]		= HID_KEY_ARROW_DOWN;
 		conv_table[KEY_JOY_LEFT][1]		= HID_KEY_ARROW_LEFT;
 		conv_table[KEY_JOY_RIGHT][1]	= HID_KEY_ARROW_RIGHT;
-		conv_table[KEY_BTN_RIGHT1][1] = HID_KEY_ESCAPE;
+		//conv_table[KEY_BTN_RIGHT1][1] = HID_KEY_ESCAPE;
 		
 if (tud_hid_n_ready(USB_ITF_CONSUMER))
 {
@@ -74,6 +74,9 @@ if (tud_hid_n_ready(USB_ITF_CONSUMER))
 
 else if (key == KEY_BTN_LEFT2)
     consumer_key = HID_USAGE_CONSUMER_AC_HOME;
+
+	else if (key == KEY_BTN_RIGHT1)
+    consumer_key = 0x0224;
 
 else if (key == KEY_BTN_RIGHT2)
     consumer_key = 0x0030; // Power
