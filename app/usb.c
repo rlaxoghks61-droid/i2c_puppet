@@ -22,6 +22,8 @@ static struct
 	uint8_t write_len;
 } self;
 
+static int8_t last_dir = 0;
+
 // TODO: What about Ctrl?
 // TODO: What should L1, L2, R1, R2 do
 // TODO: Should touch send arrow keys as an option?
@@ -129,26 +131,60 @@ static struct key_callback key_callback = { .func = key_cb };
 static void touch_cb(int8_t x, int8_t y)
 {
 	if (keyboard_get_capslock() && tud_hid_n_ready(USB_ITF_KEYBOARD))
-	{
-		uint8_t keycode[6] = {0};
-		uint8_t empty[6] = {0};
+{
+	uint8_t keycode[6] = {0};
+	uint8_t empty[6] = {0};
 
-		if (y < -2)
-			keycode[0] = HID_KEY_ARROW_UP;
-		else if (y > 2)
-			keycode[0] = HID_KEY_ARROW_DOWN;
-		else if (x < -2)
-			keycode[0] = HID_KEY_ARROW_LEFT;
-		else if (x > 2)
-			keycode[0] = HID_KEY_ARROW_RIGHT;
-		else
-			return;
+	int8_t dir = 0;
 
-		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
-		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, empty);
+	if (y < -2)
+		dir = 1;
+	else if (y > 2)
+		dir = 2;
+	else if (x < -2)
+		dir = 3;
+	else if (x > 2)
+		dir = 4;
 
+	if ((x > -1 && x < 1) &&
+    (y > -1 && y < 1))
+{
+	last_dir = 0;
+	return;
+}
+
+	if (dir == 0)
+	return;
+
+	if (dir == last_dir)
 		return;
+
+	last_dir = dir;
+
+	switch(dir)
+	{
+		case 1:
+			keycode[0] = HID_KEY_ARROW_UP;
+			break;
+
+		case 2:
+			keycode[0] = HID_KEY_ARROW_DOWN;
+			break;
+
+		case 3:
+			keycode[0] = HID_KEY_ARROW_LEFT;
+			break;
+
+		case 4:
+			keycode[0] = HID_KEY_ARROW_RIGHT;
+			break;
 	}
+
+	tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
+	tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, empty);
+
+	return;
+}
 
 	if (!tud_hid_n_ready(USB_ITF_MOUSE) || !reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON))
 		return;
