@@ -94,6 +94,11 @@ if (tud_hid_n_ready(USB_ITF_CONSUMER))
 				modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
 
 			keycode[0] = conv_table[(int)key][1];
+			if (key == 0xF2) { // HANGUL KEY
+    modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+    keycode[0] = conv_table[0x20][1];
+    //HANGUL KEY Press to Shift+Space
+			}
 		}
 
 		if (state != KEY_STATE_HOLD)
