@@ -24,6 +24,8 @@ static struct
 
 static int16_t nav_acc_x = 0;
 static int16_t nav_acc_y = 0;
+static bool nav_sent = false;
+static uint32_t last_touch_time_ms = 0;
 
 // TODO: What about Ctrl?
 // TODO: What should L1, L2, R1, R2 do
@@ -136,6 +138,20 @@ static void touch_cb(int8_t x, int8_t y)
 		uint8_t keycode[6] = {0};
 		uint8_t empty[6] = {0};
 
+		uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+
+		if ((now_ms - last_touch_time_ms) > 250)
+		{
+			nav_sent = false;
+			nav_acc_x = 0;
+			nav_acc_y = 0;
+		}
+
+		last_touch_time_ms = now_ms;
+
+		if (nav_sent)
+			return;
+
 		nav_acc_x += x;
 		nav_acc_y += y;
 
@@ -150,6 +166,7 @@ static void touch_cb(int8_t x, int8_t y)
 		else
 			return;
 
+		nav_sent = true;
 		nav_acc_x = 0;
 		nav_acc_y = 0;
 
@@ -159,6 +176,7 @@ static void touch_cb(int8_t x, int8_t y)
 		return;
 	}
 
+	nav_sent = false;
 	nav_acc_x = 0;
 	nav_acc_y = 0;
 
