@@ -78,129 +78,153 @@ static int64_t timer_task(alarm_id_t id, void *user_data)
 static void key_cb(char key, enum key_state state)
 {
 	if (state == KEY_STATE_PRESSED)
-{
-    last_key_time_ms = to_ms_since_boot(get_absolute_time());
+	{
+		last_key_time_ms = to_ms_since_boot(get_absolute_time());
 
-    if (bkl_auto_off)
-    {
-        switch (bkl_step)
-{
-    case 0: reg_set_value(REG_ID_BKL, 0); break;
-    case 1: reg_set_value(REG_ID_BKL, 85); break;
-    case 2: reg_set_value(REG_ID_BKL, 170); break;
-    case 3: reg_set_value(REG_ID_BKL, 255); break;
-}
+		if (bkl_auto_off)
+		{
+			switch (bkl_step)
+			{
+				case 0: reg_set_value(REG_ID_BKL, 0); break;
+				case 1: reg_set_value(REG_ID_BKL, 85); break;
+				case 2: reg_set_value(REG_ID_BKL, 170); break;
+				case 3: reg_set_value(REG_ID_BKL, 255); break;
+			}
 
-        backlight_sync();
-        bkl_auto_off = false;
-    }
-}
-	// Don't send mods over USB
+			backlight_sync();
+			bkl_auto_off = false;
+		}
+	}
+
 	if (key == KEY_MOD_ALT)
 {
-    alt_pressed = (state != KEY_STATE_RELEASED);
-    return;
+	alt_pressed = (state != KEY_STATE_RELEASED);
+
+	if (tud_hid_n_ready(USB_ITF_KEYBOARD) &&
+		reg_is_bit_set(REG_ID_CF2, CF2_USB_KEYB_ON))
+	{
+		uint8_t keycode[6] = {0};
+		uint8_t modifier = 0;
+
+		if (state != KEY_STATE_RELEASED)
+			modifier = KEYBOARD_MODIFIER_LEFTALT;
+
+		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, modifier, keycode);
+	}
+
+	return;
 }
 
-if ((key == KEY_MOD_SHL) ||
-    (key == KEY_MOD_SHR) ||
-    (key == KEY_MOD_SYM))
-    return;
+	if ((key == KEY_MOD_SHL) ||
+		(key == KEY_MOD_SHR) ||
+		(key == KEY_MOD_SYM))
+		return;
 
-	if (tud_hid_n_ready(USB_ITF_KEYBOARD) && reg_is_bit_set(REG_ID_CF2, CF2_USB_KEYB_ON)) {
+	if (tud_hid_n_ready(USB_ITF_KEYBOARD) &&
+		reg_is_bit_set(REG_ID_CF2, CF2_USB_KEYB_ON))
+	{
 		if (alt_pressed &&
-    key == KEY_BTN_RIGHT2 &&
-    state == KEY_STATE_PRESSED)
-{
-    bkl_step++;
+			key == KEY_BTN_RIGHT2 &&
+			state == KEY_STATE_PRESSED)
+		{
+			bkl_step++;
 
-if (bkl_step > 3)
-    bkl_step = 0;
+			if (bkl_step > 3)
+				bkl_step = 0;
 
-switch (bkl_step)
-{
-    case 0:
-        reg_set_value(REG_ID_BKL, 0);
-        break;
+			switch (bkl_step)
+			{
+				case 0:
+					reg_set_value(REG_ID_BKL, 0);
+					break;
 
-    case 1:
-        reg_set_value(REG_ID_BKL, 85);
-        break;
+				case 1:
+					reg_set_value(REG_ID_BKL, 85);
+					break;
 
-    case 2:
-        reg_set_value(REG_ID_BKL, 170);
-        break;
+				case 2:
+					reg_set_value(REG_ID_BKL, 170);
+					break;
 
-    case 3:
-        reg_set_value(REG_ID_BKL, 255);
-        break;
-}
+				case 3:
+					reg_set_value(REG_ID_BKL, 255);
+					break;
+			}
 
-    backlight_sync();
-    return;
-}
-		uint8_t conv_table[128][2]		= { HID_ASCII_TO_KEYCODE };
-		conv_table['\n'][1]				= HID_KEY_ENTER; // Fixup: Enter instead of Return
-		conv_table[KEY_JOY_UP][1]		= HID_KEY_ARROW_UP;
-		conv_table[KEY_JOY_DOWN][1]		= HID_KEY_ARROW_DOWN;
-		conv_table[KEY_JOY_LEFT][1]		= HID_KEY_ARROW_LEFT;
-		conv_table[KEY_JOY_RIGHT][1]	= HID_KEY_ARROW_RIGHT;
-		//conv_table[KEY_BTN_RIGHT1][1] = HID_KEY_ESCAPE;
-		
-if (tud_hid_n_ready(USB_ITF_CONSUMER))
-{
-    uint16_t consumer_key = 0;
+			backlight_sync();
+			return;
+		}
 
-    if (state == KEY_STATE_PRESSED)
-    {
-        if (key == KEY_BTN_LEFT1)
-    consumer_key = 0x00CD; // Play/Pause, 통화 테스트용
+		uint8_t conv_table[128][2] = { HID_ASCII_TO_KEYCODE };
+		conv_table['\n'][1] = HID_KEY_ENTER;
+		conv_table[KEY_JOY_UP][1] = HID_KEY_ARROW_UP;
+		conv_table[KEY_JOY_DOWN][1] = HID_KEY_ARROW_DOWN;
+		conv_table[KEY_JOY_LEFT][1] = HID_KEY_ARROW_LEFT;
+		conv_table[KEY_JOY_RIGHT][1] = HID_KEY_ARROW_RIGHT;
 
-else if (key == KEY_BTN_LEFT2)
-    consumer_key = HID_USAGE_CONSUMER_AC_HOME;
+		if (tud_hid_n_ready(USB_ITF_CONSUMER))
+		{
+			uint16_t consumer_key = 0;
 
-	else if (key == KEY_BTN_RIGHT1)
-    consumer_key = 0x0224;
+			if (state == KEY_STATE_PRESSED)
+			{
+				if (key == KEY_BTN_LEFT1)
+					consumer_key = 0x00CD;
+				else if (key == KEY_BTN_LEFT2)
+					consumer_key = HID_USAGE_CONSUMER_AC_HOME;
+				else if (key == KEY_BTN_RIGHT1)
+					consumer_key = 0x0224;
+				else if (key == KEY_BTN_RIGHT2)
+					consumer_key = 0x0030;
+			}
 
-else if (key == KEY_BTN_RIGHT2)
-    consumer_key = 0x0030; // Power
-    }
+			tud_hid_n_report(
+				USB_ITF_CONSUMER,
+				0,
+				&consumer_key,
+				sizeof(consumer_key)
+			);
+		}
 
-    tud_hid_n_report(
-        USB_ITF_CONSUMER,
-        0,
-        &consumer_key,
-        sizeof(consumer_key)
-    );
-}
-		uint8_t keycode[6] = { 0 };
-uint8_t modifier   = 0;
+		uint8_t keycode[6] = {0};
+		uint8_t modifier = 0;
 
-if (state == KEY_STATE_PRESSED) {
-    if (conv_table[(int)key][0])
-        modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+		if (state == KEY_STATE_PRESSED)
+		{
+			if (conv_table[(int)key][0])
+				modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
 
-    keycode[0] = conv_table[(int)key][1];
+			keycode[0] = conv_table[(int)key][1];
 
-    if (key == 0xF2) {
-        modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
-        keycode[0] = conv_table[0x20][1];
-    }
-}
+			if (key == 0xF2)
+			{
+				modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+				keycode[0] = conv_table[0x20][1];
+			}
+		}
 
-if (state != KEY_STATE_HOLD)
-    tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, modifier, keycode);
+		if (state != KEY_STATE_HOLD)
+			tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, modifier, keycode);
+	}
 
-	if (tud_hid_n_ready(USB_ITF_MOUSE) && reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON)) {
-		if (key == KEY_JOY_CENTER) {
-			if (state == KEY_STATE_PRESSED) {
+	if (tud_hid_n_ready(USB_ITF_MOUSE) &&
+		reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON))
+	{
+		if (key == KEY_JOY_CENTER)
+		{
+			if (state == KEY_STATE_PRESSED)
+			{
 				self.mouse_btn = MOUSE_BUTTON_LEFT;
 				self.mouse_moved = false;
 				tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, MOUSE_BUTTON_LEFT, 0, 0, 0, 0);
-			} else if ((state == KEY_STATE_HOLD) && !self.mouse_moved) {
+			}
+			else if ((state == KEY_STATE_HOLD) && !self.mouse_moved)
+			{
 				self.mouse_btn = MOUSE_BUTTON_RIGHT;
 				tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, MOUSE_BUTTON_RIGHT, 0, 0, 0, 0);
-			} else if (state == KEY_STATE_RELEASED) {
+			}
+			else if (state == KEY_STATE_RELEASED)
+			{
 				self.mouse_btn = 0x00;
 				tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, 0x00, 0, 0, 0, 0);
 			}
