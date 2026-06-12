@@ -174,9 +174,8 @@ else if (key == KEY_BTN_RIGHT2)
     );
 }
 		uint8_t keycode[6] = { 0 };
-		uint8_t modifier   = 0;
+uint8_t modifier   = 0;
 
-		if (state == KEY_STATE_PRESSED) {
 if (state == KEY_STATE_PRESSED) {
     if (conv_table[(int)key][0])
         modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
@@ -189,9 +188,8 @@ if (state == KEY_STATE_PRESSED) {
     }
 }
 
-		if (state != KEY_STATE_HOLD)
-			tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, modifier, keycode);
-	}
+if (state != KEY_STATE_HOLD)
+    tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, modifier, keycode);
 
 	if (tud_hid_n_ready(USB_ITF_MOUSE) && reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON)) {
 		if (key == KEY_JOY_CENTER) {
