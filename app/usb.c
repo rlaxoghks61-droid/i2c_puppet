@@ -28,6 +28,8 @@ static int16_t nav_acc_y = 0;
 static uint32_t nav_block_until_ms = 0;
 static bool nav_release_pending = false;
 static uint32_t nav_release_time_ms = 0;
+static bool alt_pressed = false;
+static uint8_t bkl_step = 4;
 
 // TODO: What about Ctrl?
 // TODO: What should L1, L2, R1, R2 do
@@ -66,13 +68,53 @@ static int64_t timer_task(alarm_id_t id, void *user_data)
 static void key_cb(char key, enum key_state state)
 {
 	// Don't send mods over USB
-	if ((key == KEY_MOD_SHL) ||
-		(key == KEY_MOD_SHR) ||
-		(key == KEY_MOD_ALT) ||
-		(key == KEY_MOD_SYM))
-		return;
+	if (key == KEY_MOD_ALT)
+{
+    alt_pressed = (state != KEY_STATE_RELEASED);
+    return;
+}
+
+if ((key == KEY_MOD_SHL) ||
+    (key == KEY_MOD_SHR) ||
+    (key == KEY_MOD_SYM))
+    return;
 
 	if (tud_hid_n_ready(USB_ITF_KEYBOARD) && reg_is_bit_set(REG_ID_CF2, CF2_USB_KEYB_ON)) {
+		if (alt_pressed &&
+    key == KEY_BTN_RIGHT2 &&
+    state == KEY_STATE_PRESSED)
+{
+    bkl_step++;
+
+    if (bkl_step > 4)
+        bkl_step = 0;
+
+    switch (bkl_step)
+    {
+        case 0:
+            reg_set_value(REG_ID_BKL, 0);
+            break;
+
+        case 1:
+            reg_set_value(REG_ID_BKL, 64);
+            break;
+
+        case 2:
+            reg_set_value(REG_ID_BKL, 128);
+            break;
+
+        case 3:
+            reg_set_value(REG_ID_BKL, 192);
+            break;
+
+        case 4:
+            reg_set_value(REG_ID_BKL, 255);
+            break;
+    }
+
+    backlight_sync();
+    return;
+}
 		uint8_t conv_table[128][2]		= { HID_ASCII_TO_KEYCODE };
 		conv_table['\n'][1]				= HID_KEY_ENTER; // Fixup: Enter instead of Return
 		conv_table[KEY_JOY_UP][1]		= HID_KEY_ARROW_UP;
