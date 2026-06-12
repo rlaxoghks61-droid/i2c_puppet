@@ -28,7 +28,7 @@ static uint32_t nav_block_until_ms = 0;
 static bool nav_release_pending = false;
 static uint32_t nav_release_time_ms = 0;
 static bool alt_pressed = false;
-static uint8_t bkl_step = 4;
+static uint8_t bkl_step = 3;
 static uint32_t last_key_time_ms = 0;
 static bool bkl_auto_off = false;
 
@@ -84,13 +84,12 @@ static void key_cb(char key, enum key_state state)
     if (bkl_auto_off)
     {
         switch (bkl_step)
-        {
-            case 0: reg_set_value(REG_ID_BKL, 0); break;
-            case 1: reg_set_value(REG_ID_BKL, 64); break;
-            case 2: reg_set_value(REG_ID_BKL, 128); break;
-            case 3: reg_set_value(REG_ID_BKL, 192); break;
-            case 4: reg_set_value(REG_ID_BKL, 255); break;
-        }
+{
+    case 0: reg_set_value(REG_ID_BKL, 0); break;
+    case 1: reg_set_value(REG_ID_BKL, 85); break;
+    case 2: reg_set_value(REG_ID_BKL, 170); break;
+    case 3: reg_set_value(REG_ID_BKL, 255); break;
+}
 
         backlight_sync();
         bkl_auto_off = false;
@@ -115,31 +114,27 @@ if ((key == KEY_MOD_SHL) ||
 {
     bkl_step++;
 
-    if (bkl_step > 4)
-        bkl_step = 0;
+if (bkl_step > 3)
+    bkl_step = 0;
 
-    switch (bkl_step)
-    {
-        case 0:
-            reg_set_value(REG_ID_BKL, 0);
-            break;
+switch (bkl_step)
+{
+    case 0:
+        reg_set_value(REG_ID_BKL, 0);
+        break;
 
-        case 1:
-            reg_set_value(REG_ID_BKL, 64);
-            break;
+    case 1:
+        reg_set_value(REG_ID_BKL, 85);
+        break;
 
-        case 2:
-            reg_set_value(REG_ID_BKL, 128);
-            break;
+    case 2:
+        reg_set_value(REG_ID_BKL, 170);
+        break;
 
-        case 3:
-            reg_set_value(REG_ID_BKL, 192);
-            break;
-
-        case 4:
-            reg_set_value(REG_ID_BKL, 255);
-            break;
-    }
+    case 3:
+        reg_set_value(REG_ID_BKL, 255);
+        break;
+}
 
     backlight_sync();
     return;
@@ -217,6 +212,23 @@ static struct key_callback key_callback = { .func = key_cb };
 
 static void touch_cb(int8_t x, int8_t y)
 {
+	last_key_time_ms = to_ms_since_boot(get_absolute_time());
+
+	if (bkl_auto_off)
+	{
+		switch (bkl_step)
+		{
+			case 0: reg_set_value(REG_ID_BKL, 0); break;
+			case 1: reg_set_value(REG_ID_BKL, 64); break;
+			case 2: reg_set_value(REG_ID_BKL, 128); break;
+			case 3: reg_set_value(REG_ID_BKL, 192); break;
+			case 4: reg_set_value(REG_ID_BKL, 255); break;
+		}
+
+		backlight_sync();
+		bkl_auto_off = false;
+	}
+
 	if (keyboard_get_capslock() && tud_hid_n_ready(USB_ITF_KEYBOARD))
 {
 	if (tud_hid_n_ready(USB_ITF_MOUSE))
