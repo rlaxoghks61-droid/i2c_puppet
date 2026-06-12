@@ -285,7 +285,7 @@ if (now_ms < nav_block_until_ms)
 
 		nav_acc_x = 0;
 		nav_acc_y = 0;
-		nav_block_until_ms = now_ms + 600;
+		nav_block_until_ms = now_ms + 350;
 
 		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
 
