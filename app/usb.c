@@ -97,12 +97,8 @@ static void key_cb(char key, enum key_state state)
 	}
 
 	if (key == KEY_MOD_ALT)
-{if (key == KEY_MOD_ALT)
 {
 	alt_pressed = (state != KEY_STATE_RELEASED);
-	return;
-}
-
 	return;
 }
 
@@ -199,20 +195,6 @@ if (state == KEY_STATE_PRESSED)
 			modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
 			keycode[0] = conv_table[0x20][1];
 		}
-	}
-}
-
-if (state == KEY_STATE_PRESSED)
-{
-	if (conv_table[(int)key][0])
-		modifier |= KEYBOARD_MODIFIER_LEFTSHIFT;
-
-	keycode[0] = conv_table[(int)key][1];
-
-	if (key == 0xF2)
-	{
-		modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
-		keycode[0] = conv_table[0x20][1];
 	}
 }
 
