@@ -217,13 +217,12 @@ static void touch_cb(int8_t x, int8_t y)
 	if (bkl_auto_off)
 	{
 		switch (bkl_step)
-		{
-			case 0: reg_set_value(REG_ID_BKL, 0); break;
-			case 1: reg_set_value(REG_ID_BKL, 64); break;
-			case 2: reg_set_value(REG_ID_BKL, 128); break;
-			case 3: reg_set_value(REG_ID_BKL, 192); break;
-			case 4: reg_set_value(REG_ID_BKL, 255); break;
-		}
+{
+	case 0: reg_set_value(REG_ID_BKL, 0); break;
+	case 1: reg_set_value(REG_ID_BKL, 85); break;
+	case 2: reg_set_value(REG_ID_BKL, 170); break;
+	case 3: reg_set_value(REG_ID_BKL, 255); break;
+}
 
 		backlight_sync();
 		bkl_auto_off = false;
