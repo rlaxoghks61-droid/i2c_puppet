@@ -187,24 +187,27 @@ static void key_cb(char key, enum key_state state)
 		}
 
 		uint8_t keycode[6] = {0};
-		uint8_t modifier = 0;
+uint8_t modifier = 0;
 
-		if (state == KEY_STATE_PRESSED)
-		{
-			if (conv_table[(int)key][0])
-				modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+if (alt_pressed)
+	modifier = KEYBOARD_MODIFIER_LEFTALT;
 
-			keycode[0] = conv_table[(int)key][1];
+if (state == KEY_STATE_PRESSED)
+{
+	if (conv_table[(int)key][0])
+		modifier |= KEYBOARD_MODIFIER_LEFTSHIFT;
 
-			if (key == 0xF2)
-			{
-				modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
-				keycode[0] = conv_table[0x20][1];
-			}
-		}
+	keycode[0] = conv_table[(int)key][1];
 
-		if (state != KEY_STATE_HOLD)
-			tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, modifier, keycode);
+	if (key == 0xF2)
+	{
+		modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+		keycode[0] = conv_table[0x20][1];
+	}
+}
+
+if (state != KEY_STATE_HOLD)
+	tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, modifier, keycode);
 	}
 
 	if (tud_hid_n_ready(USB_ITF_MOUSE) &&
