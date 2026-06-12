@@ -97,20 +97,11 @@ static void key_cb(char key, enum key_state state)
 	}
 
 	if (key == KEY_MOD_ALT)
+{if (key == KEY_MOD_ALT)
 {
 	alt_pressed = (state != KEY_STATE_RELEASED);
-
-	if (tud_hid_n_ready(USB_ITF_KEYBOARD) &&
-		reg_is_bit_set(REG_ID_CF2, CF2_USB_KEYB_ON))
-	{
-		uint8_t keycode[6] = {0};
-		uint8_t modifier = 0;
-
-		if (state != KEY_STATE_RELEASED)
-			modifier = KEYBOARD_MODIFIER_LEFTALT;
-
-		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, modifier, keycode);
-	}
+	return;
+}
 
 	return;
 }
@@ -189,8 +180,27 @@ static void key_cb(char key, enum key_state state)
 		uint8_t keycode[6] = {0};
 uint8_t modifier = 0;
 
-if (alt_pressed)
-	modifier = KEYBOARD_MODIFIER_LEFTALT;
+if (state == KEY_STATE_PRESSED)
+{
+	if (alt_pressed && key == '\n')
+	{
+		modifier = KEYBOARD_MODIFIER_LEFTALT;
+		keycode[0] = HID_KEY_ENTER;
+	}
+	else
+	{
+		if (conv_table[(int)key][0])
+			modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+
+		keycode[0] = conv_table[(int)key][1];
+
+		if (key == 0xF2)
+		{
+			modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+			keycode[0] = conv_table[0x20][1];
+		}
+	}
+}
 
 if (state == KEY_STATE_PRESSED)
 {
