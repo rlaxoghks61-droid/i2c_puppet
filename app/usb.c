@@ -18,7 +18,6 @@ static struct
 	mutex_t mutex;
 	bool mouse_moved;
 	uint8_t mouse_btn;
-
 	uint8_t write_buffer[2];
 	uint8_t write_len;
 } self;
@@ -30,6 +29,8 @@ static bool nav_release_pending = false;
 static uint32_t nav_release_time_ms = 0;
 static bool alt_pressed = false;
 static uint8_t bkl_step = 4;
+static uint32_t last_key_time_ms = 0;
+static bool bkl_auto_off = false;
 
 // TODO: What about Ctrl?
 // TODO: What should L1, L2, R1, R2 do
@@ -40,9 +41,18 @@ static void low_priority_worker_irq(void)
 	if (mutex_try_enter(&self.mutex, NULL)) {
 		tud_task();
 
-		if (nav_release_pending) {
-			uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+		uint32_t now_ms = to_ms_since_boot(get_absolute_time());
 
+		if (!bkl_auto_off &&
+			bkl_step != 0 &&
+			(now_ms - last_key_time_ms) > 30000)
+		{
+			reg_set_value(REG_ID_BKL, 0);
+			backlight_sync();
+			bkl_auto_off = true;
+		}
+
+		if (nav_release_pending) {
 			if (now_ms >= nav_release_time_ms) {
 				uint8_t empty[6] = {0};
 
@@ -67,6 +77,25 @@ static int64_t timer_task(alarm_id_t id, void *user_data)
 
 static void key_cb(char key, enum key_state state)
 {
+	if (state == KEY_STATE_PRESSED)
+{
+    last_key_time_ms = to_ms_since_boot(get_absolute_time());
+
+    if (bkl_auto_off)
+    {
+        switch (bkl_step)
+        {
+            case 0: reg_set_value(REG_ID_BKL, 0); break;
+            case 1: reg_set_value(REG_ID_BKL, 64); break;
+            case 2: reg_set_value(REG_ID_BKL, 128); break;
+            case 3: reg_set_value(REG_ID_BKL, 192); break;
+            case 4: reg_set_value(REG_ID_BKL, 255); break;
+        }
+
+        backlight_sync();
+        bkl_auto_off = false;
+    }
+}
 	// Don't send mods over USB
 	if (key == KEY_MOD_ALT)
 {
