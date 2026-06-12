@@ -144,6 +144,7 @@ static void key_cb(char key, enum key_state state)
 
 		uint8_t conv_table[128][2] = { HID_ASCII_TO_KEYCODE };
 		conv_table['\n'][1] = HID_KEY_ENTER;
+		conv_table['\b'][1] = HID_KEY_BACKSPACE;
 		conv_table[KEY_JOY_UP][1] = HID_KEY_ARROW_UP;
 		conv_table[KEY_JOY_DOWN][1] = HID_KEY_ARROW_DOWN;
 		conv_table[KEY_JOY_LEFT][1] = HID_KEY_ARROW_LEFT;
