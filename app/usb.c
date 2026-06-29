@@ -210,14 +210,19 @@ static void key_cb(char key, enum key_state state)
 		if (state != KEY_STATE_HOLD && esp_keycode != 0)
 			esp_i2c_push_hid(esp_modifier, esp_keycode, (uint8_t)state);
 
-		if (state != KEY_STATE_HOLD)
-		{
-			modifier = esp_modifier;
-			keycode[0] = esp_keycode;
-		}
+		if (state == KEY_STATE_PRESSED)
+{
+    modifier = esp_modifier;
+    keycode[0] = esp_keycode;
+}
+else if (state == KEY_STATE_RELEASED)
+{
+    modifier = 0;
+    memset(keycode, 0, sizeof(keycode));
+}
 
-		if (state != KEY_STATE_HOLD)
-			tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, modifier, keycode);
+if (state != KEY_STATE_HOLD)
+    tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, modifier, keycode);
 	}
 
 	if (tud_hid_n_ready(USB_ITF_MOUSE) &&
