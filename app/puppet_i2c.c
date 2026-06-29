@@ -21,7 +21,7 @@ static struct
 		uint8_t data;
 	} read_buffer;
 
-	uint8_t write_buffer[2];
+	uint8_t write_buffer[4];
 	uint8_t write_len;
 } self;
 
