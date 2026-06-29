@@ -230,39 +230,41 @@ if (state != KEY_STATE_HOLD)
 		reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON))
 	{
 		if (key == KEY_JOY_CENTER)
-		{
-			if (keyboard_get_capslock() && state == KEY_STATE_PRESSED)
 {
-	uint8_t keycode[6] = {0};
-	keycode[0] = HID_KEY_ENTER;
+	if (keyboard_get_capslock())
+	{
+		if (state == KEY_STATE_PRESSED)
+		{
+			uint8_t keycode[6] = {0};
+			keycode[0] = HID_KEY_ENTER;
 
-	tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
+			tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
 
-	nav_release_pending = true;
-	nav_release_time_ms = to_ms_since_boot(get_absolute_time()) + 30;
+			nav_release_pending = true;
+			nav_release_time_ms = to_ms_since_boot(get_absolute_time()) + 30;
 
-	esp_i2c_push_hid(0, HID_KEY_ENTER, KEY_STATE_PRESSED);
-	esp_i2c_push_hid(0, HID_KEY_ENTER, KEY_STATE_RELEASED);
-
-	return;
-}
-			if (state == KEY_STATE_PRESSED)
-			{
-				self.mouse_btn = MOUSE_BUTTON_LEFT;
-				self.mouse_moved = false;
-				tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, MOUSE_BUTTON_LEFT, 0, 0, 0, 0);
-			}
-			else if ((state == KEY_STATE_HOLD) && !self.mouse_moved)
-			{
-				self.mouse_btn = MOUSE_BUTTON_RIGHT;
-				tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, MOUSE_BUTTON_RIGHT, 0, 0, 0, 0);
-			}
-			else if (state == KEY_STATE_RELEASED)
-			{
-				self.mouse_btn = 0x00;
-				tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, 0x00, 0, 0, 0, 0);
-			}
+			esp_i2c_push_hid(0, HID_KEY_ENTER, KEY_STATE_PRESSED);
+			esp_i2c_push_hid(0, HID_KEY_ENTER, KEY_STATE_RELEASED);
 		}
+
+		return;
+	}
+
+	if (state == KEY_STATE_PRESSED)
+	{
+		self.mouse_btn = MOUSE_BUTTON_LEFT;
+		self.mouse_moved = false;
+		tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, MOUSE_BUTTON_LEFT, 0, 0, 0, 0);
+	}
+	else if ((state == KEY_STATE_HOLD) && !self.mouse_moved)
+	{
+		self.mouse_btn = MOUSE_BUTTON_RIGHT;
+		tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, MOUSE_BUTTON_RIGHT, 0, 0, 0, 0);
+	}
+	else if (state == KEY_STATE_RELEASED)
+	{
+		self.mouse_btn = 0x00;
+		tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, 0x00, 0, 0, 0, 0);
 	}
 }
 
