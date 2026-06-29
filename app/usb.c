@@ -319,6 +319,8 @@ static void touch_cb(int8_t x, int8_t y)
 		return;
 
 	self.mouse_moved = true;
+	
+	esp_i2c_push_mouse(x, y, self.mouse_btn);
 
 	tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, self.mouse_btn, x, y, 0, 0);
 }
