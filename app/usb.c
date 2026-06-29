@@ -127,12 +127,9 @@ static void key_cb(char key, enum key_state state)
 		return;
 	}
 
-	if (tud_hid_n_ready(USB_ITF_KEYBOARD) &&
-		reg_is_bit_set(REG_ID_CF2, CF2_USB_KEYB_ON))
+	if (alt_pressed && key == KEY_BTN_RIGHT2)
 	{
-		if (alt_pressed &&
-			key == KEY_BTN_RIGHT2 &&
-			state == KEY_STATE_PRESSED)
+		if (state == KEY_STATE_PRESSED)
 		{
 			bkl_step++;
 
@@ -148,125 +145,165 @@ static void key_cb(char key, enum key_state state)
 			}
 
 			backlight_sync();
-			return;
-		}
-
-		uint8_t conv_table[128][2] = { HID_ASCII_TO_KEYCODE };
-		conv_table['\n'][1] = HID_KEY_ENTER;
-		conv_table['\b'][1] = HID_KEY_BACKSPACE;
-		conv_table[KEY_JOY_UP][1] = HID_KEY_ARROW_UP;
-		conv_table[KEY_JOY_DOWN][1] = HID_KEY_ARROW_DOWN;
-		conv_table[KEY_JOY_LEFT][1] = HID_KEY_ARROW_LEFT;
-		conv_table[KEY_JOY_RIGHT][1] = HID_KEY_ARROW_RIGHT;
-
-		if (tud_hid_n_ready(USB_ITF_CONSUMER))
-		{
-			uint16_t consumer_key = 0;
-
-			if (state == KEY_STATE_PRESSED)
-			{
-				if (key == KEY_BTN_LEFT1)
-					consumer_key = 0x00CD;
-				else if (key == KEY_BTN_LEFT2)
-					consumer_key = HID_USAGE_CONSUMER_AC_HOME;
-				else if (key == KEY_BTN_RIGHT1)
-					consumer_key = 0x0224;
-				else if (key == KEY_BTN_RIGHT2)
-					consumer_key = 0x0030;
-			}
-
-			tud_hid_n_report(
-				USB_ITF_CONSUMER,
-				0,
-				&consumer_key,
-				sizeof(consumer_key)
-			);
-		}
-
-		uint8_t keycode[6] = {0};
-		uint8_t modifier = 0;
-
-		uint8_t esp_modifier = 0;
-		uint8_t esp_keycode = 0;
-
-		if (alt_pressed && key == '\n')
-		{
-			esp_modifier = KEYBOARD_MODIFIER_LEFTALT;
-			esp_keycode = HID_KEY_ENTER;
-		}
-		else
-		{
-			if (conv_table[(int)key][0])
-				esp_modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
-
-			esp_keycode = conv_table[(int)key][1];
-
-			if (key == 0xF2)
-			{
-				esp_modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
-				esp_keycode = conv_table[0x20][1];
-			}
-		}
-
-		if (state != KEY_STATE_HOLD && esp_keycode != 0)
-			esp_i2c_push_hid(esp_modifier, esp_keycode, (uint8_t)state);
-
-		if (state == KEY_STATE_PRESSED)
-{
-    modifier = esp_modifier;
-    keycode[0] = esp_keycode;
-}
-else if (state == KEY_STATE_RELEASED)
-{
-    modifier = 0;
-    memset(keycode, 0, sizeof(keycode));
-}
-
-if (state != KEY_STATE_HOLD)
-    tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, modifier, keycode);
-	}
-
-	if (tud_hid_n_ready(USB_ITF_MOUSE) &&
-		reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON))
-	{
-		if (key == KEY_JOY_CENTER)
-{
-	if (keyboard_get_capslock())
-	{
-		if (state == KEY_STATE_PRESSED)
-		{
-			uint8_t keycode[6] = {0};
-			keycode[0] = HID_KEY_ENTER;
-
-			tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
-
-			nav_release_pending = true;
-			nav_release_time_ms = to_ms_since_boot(get_absolute_time()) + 30;
-
-			esp_i2c_push_hid(0, HID_KEY_ENTER, KEY_STATE_PRESSED);
-			esp_i2c_push_hid(0, HID_KEY_ENTER, KEY_STATE_RELEASED);
 		}
 
 		return;
 	}
 
-	if (state == KEY_STATE_PRESSED)
+	uint16_t consumer_key = 0;
+
+	if (key == KEY_BTN_LEFT1)
+		consumer_key = 0x00CD;
+	else if (key == KEY_BTN_LEFT2)
+		consumer_key = HID_USAGE_CONSUMER_AC_HOME;
+	else if (key == KEY_BTN_RIGHT1)
+		consumer_key = 0x0224;
+	else if (key == KEY_BTN_RIGHT2)
+		consumer_key = 0x0030;
+
+	if (consumer_key != 0)
 	{
-		self.mouse_btn = MOUSE_BUTTON_LEFT;
-		self.mouse_moved = false;
-		tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, MOUSE_BUTTON_LEFT, 0, 0, 0, 0);
+		if (state != KEY_STATE_HOLD)
+		{
+			esp_i2c_push_consumer(consumer_key, (uint8_t)state);
+
+			if (tud_hid_n_ready(USB_ITF_CONSUMER))
+			{
+				uint16_t report_key = 0;
+
+				if (state == KEY_STATE_PRESSED)
+					report_key = consumer_key;
+
+				tud_hid_n_report(
+					USB_ITF_CONSUMER,
+					0,
+					&report_key,
+					sizeof(report_key)
+				);
+			}
+		}
+
+		return;
 	}
-	else if ((state == KEY_STATE_HOLD) && !self.mouse_moved)
+
+	if (key == KEY_JOY_CENTER)
 	{
-		self.mouse_btn = MOUSE_BUTTON_RIGHT;
-		tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, MOUSE_BUTTON_RIGHT, 0, 0, 0, 0);
+		if (keyboard_get_capslock())
+		{
+			if (state == KEY_STATE_PRESSED)
+			{
+				uint8_t keycode[6] = {0};
+				keycode[0] = HID_KEY_ENTER;
+
+				esp_i2c_push_hid(0, HID_KEY_ENTER, KEY_STATE_PRESSED);
+				esp_i2c_push_hid(0, HID_KEY_ENTER, KEY_STATE_RELEASED);
+
+				if (tud_hid_n_ready(USB_ITF_KEYBOARD) &&
+					reg_is_bit_set(REG_ID_CF2, CF2_USB_KEYB_ON))
+				{
+					tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
+
+					nav_release_pending = true;
+					nav_release_time_ms = to_ms_since_boot(get_absolute_time()) + 30;
+				}
+			}
+
+			return;
+		}
+
+		if (state == KEY_STATE_PRESSED)
+		{
+			self.mouse_btn = MOUSE_BUTTON_LEFT;
+			self.mouse_moved = false;
+
+			esp_i2c_push_mouse(0, 0, MOUSE_BUTTON_LEFT);
+
+			if (tud_hid_n_ready(USB_ITF_MOUSE) &&
+				reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON))
+			{
+				tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, MOUSE_BUTTON_LEFT, 0, 0, 0, 0);
+			}
+		}
+		else if ((state == KEY_STATE_HOLD) && !self.mouse_moved)
+		{
+			self.mouse_btn = MOUSE_BUTTON_RIGHT;
+
+			esp_i2c_push_mouse(0, 0, MOUSE_BUTTON_RIGHT);
+
+			if (tud_hid_n_ready(USB_ITF_MOUSE) &&
+				reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON))
+			{
+				tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, MOUSE_BUTTON_RIGHT, 0, 0, 0, 0);
+			}
+		}
+		else if (state == KEY_STATE_RELEASED)
+		{
+			self.mouse_btn = 0x00;
+
+			esp_i2c_push_mouse(0, 0, 0x00);
+
+			if (tud_hid_n_ready(USB_ITF_MOUSE) &&
+				reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON))
+			{
+				tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, 0x00, 0, 0, 0, 0);
+			}
+		}
+
+		return;
 	}
-	else if (state == KEY_STATE_RELEASED)
+
+	uint8_t conv_table[128][2] = { HID_ASCII_TO_KEYCODE };
+	conv_table['\n'][1] = HID_KEY_ENTER;
+	conv_table['\b'][1] = HID_KEY_BACKSPACE;
+	conv_table[KEY_JOY_UP][1] = HID_KEY_ARROW_UP;
+	conv_table[KEY_JOY_DOWN][1] = HID_KEY_ARROW_DOWN;
+	conv_table[KEY_JOY_LEFT][1] = HID_KEY_ARROW_LEFT;
+	conv_table[KEY_JOY_RIGHT][1] = HID_KEY_ARROW_RIGHT;
+
+	uint8_t keycode[6] = {0};
+	uint8_t modifier = 0;
+
+	uint8_t esp_modifier = 0;
+	uint8_t esp_keycode = 0;
+	uint8_t ukey = (uint8_t)key;
+
+	if (alt_pressed && key == '\n')
 	{
-		self.mouse_btn = 0x00;
-		tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, 0x00, 0, 0, 0, 0);
+		esp_modifier = KEYBOARD_MODIFIER_LEFTALT;
+		esp_keycode = HID_KEY_ENTER;
 	}
-}
+	else if (ukey == 0xF2)
+	{
+		esp_modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+		esp_keycode = HID_KEY_SPACE;
+	}
+	else if (ukey < 128)
+	{
+		if (conv_table[ukey][0])
+			esp_modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+
+		esp_keycode = conv_table[ukey][1];
+	}
+
+	if (state != KEY_STATE_HOLD && esp_keycode != 0)
+		esp_i2c_push_hid(esp_modifier, esp_keycode, (uint8_t)state);
+
+	if (tud_hid_n_ready(USB_ITF_KEYBOARD) &&
+		reg_is_bit_set(REG_ID_CF2, CF2_USB_KEYB_ON))
+	{
+		if (state == KEY_STATE_PRESSED)
+		{
+			modifier = esp_modifier;
+			keycode[0] = esp_keycode;
+		}
+		else if (state == KEY_STATE_RELEASED)
+		{
+			modifier = 0;
+			memset(keycode, 0, sizeof(keycode));
+		}
+
+		if (state != KEY_STATE_HOLD)
+			tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, modifier, keycode);
 	}
 }
 
