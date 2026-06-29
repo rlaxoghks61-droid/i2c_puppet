@@ -100,14 +100,37 @@ static void key_cb(char key, enum key_state state)
 
 	if (key == KEY_MOD_ALT)
 {
-	alt_pressed = (state != KEY_STATE_RELEASED);
-	return;
+    alt_pressed = (state != KEY_STATE_RELEASED);
+
+    if (state != KEY_STATE_HOLD)
+        esp_i2c_push_hid(KEYBOARD_MODIFIER_LEFTALT, 0, (uint8_t)state);
+
+    return;
 }
 
-	if ((key == KEY_MOD_SHL) ||
-		(key == KEY_MOD_SHR) ||
-		(key == KEY_MOD_SYM))
-		return;
+if (key == KEY_MOD_SHL)
+{
+    if (state != KEY_STATE_HOLD)
+        esp_i2c_push_hid(KEYBOARD_MODIFIER_LEFTSHIFT, 0, (uint8_t)state);
+
+    return;
+}
+
+if (key == KEY_MOD_SHR)
+{
+    if (state != KEY_STATE_HOLD)
+        esp_i2c_push_hid(KEYBOARD_MODIFIER_RIGHTSHIFT, 0, (uint8_t)state);
+
+    return;
+}
+
+if (key == KEY_MOD_SYM)
+{
+    if (state != KEY_STATE_HOLD)
+        esp_i2c_push_hid(KEYBOARD_MODIFIER_RIGHTALT, 0, (uint8_t)state);
+
+    return;
+}
 
 	if (tud_hid_n_ready(USB_ITF_KEYBOARD) &&
 		reg_is_bit_set(REG_ID_CF2, CF2_USB_KEYB_ON))
