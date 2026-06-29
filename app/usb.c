@@ -231,6 +231,21 @@ if (state != KEY_STATE_HOLD)
 	{
 		if (key == KEY_JOY_CENTER)
 		{
+			if (keyboard_get_capslock() && state == KEY_STATE_PRESSED)
+{
+	uint8_t keycode[6] = {0};
+	keycode[0] = HID_KEY_ENTER;
+
+	tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
+
+	nav_release_pending = true;
+	nav_release_time_ms = to_ms_since_boot(get_absolute_time()) + 30;
+
+	esp_i2c_push_hid(0, HID_KEY_ENTER, KEY_STATE_PRESSED);
+	esp_i2c_push_hid(0, HID_KEY_ENTER, KEY_STATE_RELEASED);
+
+	return;
+}
 			if (state == KEY_STATE_PRESSED)
 			{
 				self.mouse_btn = MOUSE_BUTTON_LEFT;
