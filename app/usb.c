@@ -181,26 +181,35 @@ static void key_cb(char key, enum key_state state)
 		uint8_t keycode[6] = {0};
 uint8_t modifier = 0;
 
+uint8_t esp_modifier = 0;
+uint8_t esp_keycode = 0;
+
+if (alt_pressed && key == '\n')
+{
+	esp_modifier = KEYBOARD_MODIFIER_LEFTALT;
+	esp_keycode = HID_KEY_ENTER;
+}
+else
+{
+	if (conv_table[(int)key][0])
+		esp_modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+
+	esp_keycode = conv_table[(int)key][1];
+
+	if (key == 0xF2)
+	{
+		esp_modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+		esp_keycode = conv_table[0x20][1];
+	}
+}
+
+if (state != KEY_STATE_HOLD && esp_keycode != 0)
+	esp_i2c_push_hid(esp_modifier, esp_keycode, (uint8_t)state);
+
 if (state == KEY_STATE_PRESSED)
 {
-	if (alt_pressed && key == '\n')
-	{
-		modifier = KEYBOARD_MODIFIER_LEFTALT;
-		keycode[0] = HID_KEY_ENTER;
-	}
-	else
-	{
-		if (conv_table[(int)key][0])
-			modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
-
-		keycode[0] = conv_table[(int)key][1];
-
-		if (key == 0xF2)
-		{
-			modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
-			keycode[0] = conv_table[0x20][1];
-		}
-	}
+	modifier = esp_modifier;
+	keycode[0] = esp_keycode;
 }
 
 if (state != KEY_STATE_HOLD)
