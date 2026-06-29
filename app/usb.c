@@ -267,6 +267,8 @@ if (state != KEY_STATE_HOLD)
 		tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, 0x00, 0, 0, 0, 0);
 	}
 }
+	}
+}
 
 static struct key_callback key_callback = { .func = key_cb };
 
