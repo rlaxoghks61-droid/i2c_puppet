@@ -1,6 +1,5 @@
 #include "esp_i2c.h"
 #include "usb.h"
-#include "usb.h" 
 
 #include "backlight.h"
 #include "keyboard.h"
