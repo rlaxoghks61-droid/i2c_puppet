@@ -1,3 +1,4 @@
+#include "esp_i2c.h"
 #include "puppet_i2c.h"
 
 #include "reg.h"
@@ -35,6 +36,12 @@ static void irq_handler(void)
 				// it'sq a reg write, we need to wait for the second byte before we process
 				return;
 			}
+			if (self.read_buffer.reg == REG_ID_ESP_KEY_EVENT)
+{
+	esp_i2c_pop_key(self.write_buffer, &self.write_len);
+	self.read_buffer.reg = REG_ID_INVALID;
+	return;
+}
 		} else {
 			self.read_buffer.data = self.i2c->hw->data_cmd & 0xff;
 		}
