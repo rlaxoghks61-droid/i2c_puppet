@@ -6,6 +6,7 @@
 #include "touchpad.h"
 #include "reg.h"
 
+#include <string.h>
 #include <hardware/irq.h>
 #include <pico/mutex.h>
 #include <pico/stdlib.h>
