@@ -78,9 +78,7 @@ static int64_t timer_task(alarm_id_t id, void *user_data)
 
 static void key_cb(char key, enum key_state state)
 {
-	if (state != KEY_STATE_HOLD)
-		esp_i2c_push_key(key, state);
-	
+
 	if (state == KEY_STATE_PRESSED)
 	{
 		last_key_time_ms = to_ms_since_boot(get_absolute_time());
