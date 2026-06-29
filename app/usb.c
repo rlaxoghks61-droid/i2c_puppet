@@ -332,10 +332,8 @@ static void touch_cb(int8_t x, int8_t y)
 		if (tud_hid_n_ready(USB_ITF_MOUSE))
 			tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, 0x00, 0, 0, 0, 0);
 
-		if (!tud_hid_n_ready(USB_ITF_KEYBOARD))
-			return;
-
 		uint8_t keycode[6] = {0};
+		uint8_t nav_key = 0;
 		uint32_t now_ms = to_ms_since_boot(get_absolute_time());
 
 		if (now_ms < nav_block_until_ms)
@@ -345,13 +343,13 @@ static void touch_cb(int8_t x, int8_t y)
 		nav_acc_y += y;
 
 		if (nav_acc_y <= -12)
-			keycode[0] = HID_KEY_ARROW_UP;
+			nav_key = HID_KEY_ARROW_UP;
 		else if (nav_acc_y >= 12)
-			keycode[0] = HID_KEY_ARROW_DOWN;
+			nav_key = HID_KEY_ARROW_DOWN;
 		else if (nav_acc_x <= -12)
-			keycode[0] = HID_KEY_ARROW_LEFT;
+			nav_key = HID_KEY_ARROW_LEFT;
 		else if (nav_acc_x >= 12)
-			keycode[0] = HID_KEY_ARROW_RIGHT;
+			nav_key = HID_KEY_ARROW_RIGHT;
 		else
 			return;
 
@@ -359,10 +357,19 @@ static void touch_cb(int8_t x, int8_t y)
 		nav_acc_y = 0;
 		nav_block_until_ms = now_ms + 350;
 
-		tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
+		esp_i2c_push_hid(0, nav_key, KEY_STATE_PRESSED);
+		esp_i2c_push_hid(0, nav_key, KEY_STATE_RELEASED);
 
-		nav_release_pending = true;
-		nav_release_time_ms = now_ms + 30;
+		if (tud_hid_n_ready(USB_ITF_KEYBOARD) &&
+			reg_is_bit_set(REG_ID_CF2, CF2_USB_KEYB_ON))
+		{
+			keycode[0] = nav_key;
+
+			tud_hid_n_keyboard_report(USB_ITF_KEYBOARD, 0, 0, keycode);
+
+			nav_release_pending = true;
+			nav_release_time_ms = now_ms + 30;
+		}
 
 		return;
 	}
@@ -371,16 +378,16 @@ static void touch_cb(int8_t x, int8_t y)
 	nav_acc_y = 0;
 	nav_block_until_ms = 0;
 
-	if (!tud_hid_n_ready(USB_ITF_MOUSE) || !reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON))
-		return;
-
 	self.mouse_moved = true;
-	
+
 	esp_i2c_push_mouse(x, y, self.mouse_btn);
 
-	tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, self.mouse_btn, x, y, 0, 0);
+	if (tud_hid_n_ready(USB_ITF_MOUSE) &&
+		reg_is_bit_set(REG_ID_CF2, CF2_USB_MOUSE_ON))
+	{
+		tud_hid_n_mouse_report(USB_ITF_MOUSE, 0, self.mouse_btn, x, y, 0, 0);
+	}
 }
-
 static struct touch_callback touch_callback = { .func = touch_cb };
 
 uint16_t tud_hid_get_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t report_type, uint8_t *buffer, uint16_t reqlen)
