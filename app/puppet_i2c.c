@@ -1,91 +1,108 @@
 #include "esp_i2c.h"
-#include "puppet_i2c.h"
 
-#include "reg.h"
-
-#include <hardware/i2c.h>
-#include <hardware/irq.h>
 #include <pico/stdlib.h>
 
-#define REG_ID_INVALID		0x00
+#define QUEUE_SIZE 32
+#define ESP_INT_PIN PIN_INT
 
-static i2c_inst_t *i2c_instances[2] = { i2c0, i2c1 };
-
-static struct
+struct esp_event_packet
 {
-	i2c_inst_t *i2c;
+	uint8_t type;
+	uint8_t a;
+	uint8_t b;
+	uint8_t c;
+};
 
-	struct
+static volatile struct esp_event_packet queue[QUEUE_SIZE];
+static volatile uint8_t head = 0;
+static volatile uint8_t tail = 0;
+
+static void update_int_pin(void)
+{
+	if (head == tail)
+		gpio_put(ESP_INT_PIN, 1);  // queue empty
+	else
+		gpio_put(ESP_INT_PIN, 0);  // event waiting
+}
+
+void esp_i2c_init(void)
+{
+	gpio_init(ESP_INT_PIN);
+	gpio_set_dir(ESP_INT_PIN, GPIO_OUT);
+	gpio_put(ESP_INT_PIN, 1);
+}
+
+static void push_event(uint8_t type, uint8_t a, uint8_t b, uint8_t c)
+{
+	uint8_t next = (head + 1) % QUEUE_SIZE;
+
+	if (next == tail)
 	{
-		uint8_t reg;
-		uint8_t data;
-	} read_buffer;
+		tail = (tail + 1) % QUEUE_SIZE;
+	}
 
-	uint8_t write_buffer[4];
-	uint8_t write_len;
-} self;
+	queue[head].type = type;
+	queue[head].a = a;
+	queue[head].b = b;
+	queue[head].c = c;
 
-static void irq_handler(void)
-{
-	// the controller sent data
-	if (self.i2c->hw->intr_stat & I2C_IC_INTR_MASK_M_RX_FULL_BITS) {
-		if (self.read_buffer.reg == REG_ID_INVALID) {
-			self.read_buffer.reg = self.i2c->hw->data_cmd & 0xff;
+	head = next;
 
-			if (self.read_buffer.reg & PACKET_WRITE_MASK) {
-				// it'sq a reg write, we need to wait for the second byte before we process
-				return;
-			}
-			if (self.read_buffer.reg == REG_ID_ESP_KEY_EVENT)
-{
-	esp_i2c_pop_key(self.write_buffer, &self.write_len);
-	self.read_buffer.reg = REG_ID_INVALID;
-	return;
+	update_int_pin();
 }
-		} else {
-			self.read_buffer.data = self.i2c->hw->data_cmd & 0xff;
-		}
 
-		reg_process_packet(self.read_buffer.reg, self.read_buffer.data, self.write_buffer, &self.write_len);
+void esp_i2c_push_hid(uint8_t modifier, uint8_t keycode, uint8_t state)
+{
+	push_event(
+		ESP_EVT_KEY,
+		modifier,
+		keycode,
+		state
+	);
+}
 
-		// ready for the next operation
-		self.read_buffer.reg = REG_ID_INVALID;
+void esp_i2c_push_mouse(int8_t x, int8_t y, uint8_t buttons)
+{
+	push_event(
+		ESP_EVT_MOUSE,
+		(uint8_t)x,
+		(uint8_t)y,
+		buttons
+	);
+}
 
+void esp_i2c_push_consumer(uint16_t usage, uint8_t state)
+{
+	push_event(
+		ESP_EVT_CONSUMER,
+		(uint8_t)(usage & 0xFF),
+		(uint8_t)((usage >> 8) & 0xFF),
+		state
+	);
+}
+
+void esp_i2c_pop_key(uint8_t *buffer, uint8_t *len)
+{
+	if (tail == head)
+	{
+		buffer[0] = 0;
+		buffer[1] = 0;
+		buffer[2] = 0;
+		buffer[3] = 0;
+		*len = 4;
+
+		update_int_pin();
 		return;
 	}
 
-	// the controller requested a read
-	if (self.i2c->hw->intr_stat & I2C_IC_INTR_MASK_M_RD_REQ_BITS) {
-		i2c_write_raw_blocking(self.i2c, self.write_buffer, self.write_len);
+	buffer[0] = queue[tail].type;
+	buffer[1] = queue[tail].a;
+	buffer[2] = queue[tail].b;
+	buffer[3] = queue[tail].c;
 
-		self.i2c->hw->clr_rd_req;
-		return;
-	}
-}
+	tail = (tail + 1) % QUEUE_SIZE;
 
-void puppet_i2c_sync_address(void)
-{
-	i2c_set_slave_mode(self.i2c, true, reg_get_value(REG_ID_ADR));
-}
+	*len = 4;
 
-void puppet_i2c_init(void)
-{
-	// determine the instance based on SCL pin, hope you didn't screw up the SDA pin!
-	self.i2c = i2c_instances[(PIN_PUPPET_SCL / 2) % 2];
-
-	i2c_init(self.i2c, 100 * 1000);
-	puppet_i2c_sync_address();
-
-	gpio_set_function(PIN_PUPPET_SDA, GPIO_FUNC_I2C);
-	gpio_pull_up(PIN_PUPPET_SDA);
-
-	gpio_set_function(PIN_PUPPET_SCL, GPIO_FUNC_I2C);
-	gpio_pull_up(PIN_PUPPET_SCL);
-
-	// irq when the controller sends data, and when it requests a read
-	self.i2c->hw->intr_mask = I2C_IC_INTR_MASK_M_RD_REQ_BITS | I2C_IC_INTR_MASK_M_RX_FULL_BITS;
-
-	const int irq = I2C0_IRQ + i2c_hw_index(self.i2c);
-	irq_set_exclusive_handler(irq, irq_handler);
-	irq_set_enabled(irq, true);
+	update_int_pin();
 }
