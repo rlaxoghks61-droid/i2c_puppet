@@ -97,11 +97,10 @@ static void key_cb(char key, enum key_state state)
 
 	if (key == KEY_MOD_ALT)
 	{
+		// ALT is used only inside the RP2040 keyboard mapper.
+		// Do NOT send raw ALT to Android/ESP32, because Android treats
+		// ALT+H or ALT+SHIFT as language-switch shortcuts.
 		alt_pressed = (state != KEY_STATE_RELEASED);
-
-		if (state != KEY_STATE_HOLD)
-			esp_i2c_push_hid(KEYBOARD_MODIFIER_LEFTALT, 0, (uint8_t)state);
-
 		return;
 	}
 
