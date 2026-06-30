@@ -89,7 +89,7 @@ static void key_cb(char key, enum key_state state)
 				case 0: reg_set_value(REG_ID_BKL, 0); break;
 				case 1: reg_set_value(REG_ID_BKL, 50); break;
 				case 2: reg_set_value(REG_ID_BKL, 110); break;
-				case 3: reg_set_value(REG_ID_BKL, 190); break;
+				case 3: reg_set_value(REG_ID_BKL, 200); break;
 			}
 
 			backlight_sync();
@@ -159,7 +159,7 @@ static void key_cb(char key, enum key_state state)
 				case 0: reg_set_value(REG_ID_BKL, 0); break;
 				case 1: reg_set_value(REG_ID_BKL, 50); break;
 				case 2: reg_set_value(REG_ID_BKL, 110); break;
-				case 3: reg_set_value(REG_ID_BKL, 190); break;
+				case 3: reg_set_value(REG_ID_BKL, 200); break;
 			}
 
 			backlight_sync();
