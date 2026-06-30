@@ -30,6 +30,8 @@ static uint32_t nav_block_until_ms = 0;
 static bool nav_release_pending = false;
 static uint32_t nav_release_time_ms = 0;
 static bool alt_pressed = false;
+static bool sym_pressed = false;
+static bool sym_used = false;
 static uint8_t bkl_step = 3;
 static uint32_t last_key_time_ms = 0;
 static bool bkl_auto_off = false;
@@ -105,26 +107,39 @@ static void key_cb(char key, enum key_state state)
 
 	if (key == KEY_MOD_SHL)
 	{
-		if (state != KEY_STATE_HOLD)
-			esp_i2c_push_hid(KEYBOARD_MODIFIER_LEFTSHIFT, 0, (uint8_t)state);
-
 		return;
 	}
 
 	if (key == KEY_MOD_SHR)
 	{
-		if (state != KEY_STATE_HOLD)
-			esp_i2c_push_hid(KEYBOARD_MODIFIER_RIGHTSHIFT, 0, (uint8_t)state);
-
 		return;
 	}
 
 	if (key == KEY_MOD_SYM)
 	{
-		if (state != KEY_STATE_HOLD)
-			esp_i2c_push_hid(KEYBOARD_MODIFIER_LEFTSHIFT, HID_KEY_SPACE, (uint8_t)state);
+		if (state == KEY_STATE_PRESSED)
+		{
+			sym_pressed = true;
+			sym_used = false;
+		}
+		else if (state == KEY_STATE_RELEASED)
+		{
+			if (!sym_used)
+			{
+				esp_i2c_push_hid(KEYBOARD_MODIFIER_LEFTSHIFT, HID_KEY_SPACE, KEY_STATE_PRESSED);
+				esp_i2c_push_hid(KEYBOARD_MODIFIER_LEFTSHIFT, HID_KEY_SPACE, KEY_STATE_RELEASED);
+			}
+
+			sym_pressed = false;
+			sym_used = false;
+		}
 
 		return;
+	}
+
+	if (sym_pressed && state == KEY_STATE_PRESSED)
+	{
+		sym_used = true;
 	}
 
 	if (alt_pressed && key == KEY_BTN_RIGHT2)
@@ -422,7 +437,7 @@ void tud_vendor_rx_cb(uint8_t itf)
 
 void tud_mount_cb(void)
 {
-	
+
 }
 
 mutex_t *usb_get_mutex(void)
