@@ -422,7 +422,7 @@ void tud_vendor_rx_cb(uint8_t itf)
 
 void tud_mount_cb(void)
 {
-	reg_set_value(REG_ID_CFG, reg_get_value(REG_ID_CFG) | CFG_REPORT_MODS);
+	
 }
 
 mutex_t *usb_get_mutex(void)
