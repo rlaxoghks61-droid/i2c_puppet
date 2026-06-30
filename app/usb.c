@@ -30,6 +30,8 @@ static uint32_t nav_block_until_ms = 0;
 static bool nav_release_pending = false;
 static uint32_t nav_release_time_ms = 0;
 static bool alt_pressed = false;
+static bool shl_pressed = false;
+static bool shr_pressed = false;
 static bool sym_pressed = false;
 static bool sym_used = false;
 static uint8_t bkl_step = 3;
@@ -45,7 +47,7 @@ static void low_priority_worker_irq(void)
 
 		if (!bkl_auto_off &&
 			bkl_step != 0 &&
-			(now_ms - last_key_time_ms) > 30000)
+			(now_ms - last_key_time_ms) > 18000)
 		{
 			reg_set_value(REG_ID_BKL, 0);
 			backlight_sync();
@@ -85,9 +87,9 @@ static void key_cb(char key, enum key_state state)
 			switch (bkl_step)
 			{
 				case 0: reg_set_value(REG_ID_BKL, 0); break;
-				case 1: reg_set_value(REG_ID_BKL, 85); break;
-				case 2: reg_set_value(REG_ID_BKL, 170); break;
-				case 3: reg_set_value(REG_ID_BKL, 255); break;
+				case 1: reg_set_value(REG_ID_BKL, 50); break;
+				case 2: reg_set_value(REG_ID_BKL, 110); break;
+				case 3: reg_set_value(REG_ID_BKL, 190); break;
 			}
 
 			backlight_sync();
@@ -97,8 +99,8 @@ static void key_cb(char key, enum key_state state)
 
 	if (key == KEY_MOD_ALT)
 	{
-		// ALT is used only inside the RP2040 keyboard mapper.
-		// Do NOT send raw ALT to Android/ESP32, because Android treats
+		// ALT/SHIFT are tracked inside RP2040 and attached only to real key reports.
+		// Do not send raw modifier-only reports to Android, because Android treats
 		// ALT+H or ALT+SHIFT as language-switch shortcuts.
 		alt_pressed = (state != KEY_STATE_RELEASED);
 		return;
@@ -106,17 +108,13 @@ static void key_cb(char key, enum key_state state)
 
 	if (key == KEY_MOD_SHL)
 	{
-		if (state != KEY_STATE_HOLD)
-			esp_i2c_push_hid(KEYBOARD_MODIFIER_LEFTSHIFT, 0, (uint8_t)state);
-
+		shl_pressed = (state != KEY_STATE_RELEASED);
 		return;
 	}
 
 	if (key == KEY_MOD_SHR)
 	{
-		if (state != KEY_STATE_HOLD)
-			esp_i2c_push_hid(KEYBOARD_MODIFIER_RIGHTSHIFT, 0, (uint8_t)state);
-
+		shr_pressed = (state != KEY_STATE_RELEASED);
 		return;
 	}
 
@@ -159,9 +157,9 @@ static void key_cb(char key, enum key_state state)
 			switch (bkl_step)
 			{
 				case 0: reg_set_value(REG_ID_BKL, 0); break;
-				case 1: reg_set_value(REG_ID_BKL, 85); break;
-				case 2: reg_set_value(REG_ID_BKL, 170); break;
-				case 3: reg_set_value(REG_ID_BKL, 255); break;
+				case 1: reg_set_value(REG_ID_BKL, 50); break;
+				case 2: reg_set_value(REG_ID_BKL, 110); break;
+				case 3: reg_set_value(REG_ID_BKL, 190); break;
 			}
 
 			backlight_sync();
@@ -287,6 +285,13 @@ static void key_cb(char key, enum key_state state)
 	uint8_t esp_keycode = 0;
 	uint8_t ukey = (uint8_t)key;
 
+	bool no_host_modifier = false;
+
+	// Backspace must stay clean even when ALT/SHIFT are physically held.
+	// Android can ignore/consume modified Backspace in some keyboard layouts.
+	if (key == '\b')
+		no_host_modifier = true;
+
 	if (alt_pressed && key == '\n')
 	{
 		esp_modifier = KEYBOARD_MODIFIER_LEFTALT;
@@ -300,10 +305,27 @@ static void key_cb(char key, enum key_state state)
 	else if (ukey < 128)
 	{
 		if (conv_table[ukey][0])
-			esp_modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+			esp_modifier |= KEYBOARD_MODIFIER_LEFTSHIFT;
 
 		esp_keycode = conv_table[ukey][1];
 	}
+
+	if (!no_host_modifier && esp_keycode != 0)
+	{
+		if (shl_pressed)
+			esp_modifier |= KEYBOARD_MODIFIER_LEFTSHIFT;
+
+		if (shr_pressed)
+			esp_modifier |= KEYBOARD_MODIFIER_RIGHTSHIFT;
+
+		// Send ALT only as part of an actual key press, not as a standalone modifier.
+		// Suppress ALT+H because Android uses it as a hidden language-switch shortcut.
+		if (alt_pressed && key != 'h' && key != 'H')
+			esp_modifier |= KEYBOARD_MODIFIER_LEFTALT;
+	}
+
+	if (no_host_modifier)
+		esp_modifier = 0;
 
 	if (state != KEY_STATE_HOLD && esp_keycode != 0)
 		esp_i2c_push_hid(esp_modifier, esp_keycode, (uint8_t)state);
@@ -336,12 +358,12 @@ static void touch_cb(int8_t x, int8_t y)
 	if (bkl_auto_off)
 	{
 		switch (bkl_step)
-		{
-			case 0: reg_set_value(REG_ID_BKL, 0); break;
-			case 1: reg_set_value(REG_ID_BKL, 85); break;
-			case 2: reg_set_value(REG_ID_BKL, 170); break;
-			case 3: reg_set_value(REG_ID_BKL, 255); break;
-		}
+			{
+				case 0: reg_set_value(REG_ID_BKL, 0); break;
+				case 1: reg_set_value(REG_ID_BKL, 50); break;
+				case 2: reg_set_value(REG_ID_BKL, 110); break;
+				case 3: reg_set_value(REG_ID_BKL, 190); break;
+			}
 
 		backlight_sync();
 		bkl_auto_off = false;
