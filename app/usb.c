@@ -434,6 +434,8 @@ void usb_init(void)
 {
 	tusb_init();
 
+	reg_set_value(REG_ID_CFG, reg_get_value(REG_ID_CFG) | CFG_REPORT_MODS);
+
 	keyboard_add_key_callback(&key_callback);
 	touchpad_add_touch_callback(&touch_callback);
 
