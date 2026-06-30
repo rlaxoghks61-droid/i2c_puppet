@@ -107,11 +107,17 @@ static void key_cb(char key, enum key_state state)
 
 	if (key == KEY_MOD_SHL)
 	{
+		if (state != KEY_STATE_HOLD)
+			esp_i2c_push_hid(KEYBOARD_MODIFIER_LEFTSHIFT, 0, (uint8_t)state);
+
 		return;
 	}
 
 	if (key == KEY_MOD_SHR)
 	{
+		if (state != KEY_STATE_HOLD)
+			esp_i2c_push_hid(KEYBOARD_MODIFIER_RIGHTSHIFT, 0, (uint8_t)state);
+
 		return;
 	}
 
