@@ -34,7 +34,7 @@ static bool shl_pressed = false;
 static bool shr_pressed = false;
 static bool sym_pressed = false;
 static bool sym_used = false;
-static uint8_t bkl_step = 3;
+static uint8_t bkl_step = 1;
 static uint32_t last_key_time_ms = 0;
 static bool bkl_auto_off = false;
 
