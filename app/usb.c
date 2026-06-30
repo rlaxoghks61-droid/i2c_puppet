@@ -434,6 +434,8 @@ void usb_init(void)
 {
 	tusb_init();
 
+	esp_i2c_init();
+
 	keyboard_add_key_callback(&key_callback);
 	touchpad_add_touch_callback(&touch_callback);
 
