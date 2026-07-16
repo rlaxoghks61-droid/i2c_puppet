@@ -320,8 +320,6 @@ static void key_cb(char key, enum key_state state)
 
 		// Send ALT only as part of an actual key press, not as a standalone modifier.
 		// Suppress ALT+H because Android uses it as a hidden language-switch shortcut.
-		if (alt_pressed && key != 'h' && key != 'H')
-			esp_modifier |= KEYBOARD_MODIFIER_LEFTALT;
 	}
 
 	if (no_host_modifier)
