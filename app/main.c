@@ -1,9 +1,6 @@
 #include <pico/stdlib.h>
-#include <stdio.h>
-#include <tusb.h>
 
 #include "backlight.h"
-#include "debug.h"
 #include "gpioexp.h"
 #include "interrupt.h"
 #include "keyboard.h"
@@ -15,7 +12,6 @@
 // since the SDK doesn't support per-GPIO irq, we use this global irq and forward it
 static void gpio_irq(uint gpio, uint32_t events)
 {
-//	printf("%s: gpio %d, events 0x%02X\r\n", __func__, gpio, events);
 	touchpad_gpio_irq(gpio, events);
 	gpioexp_gpio_irq(gpio, events);
 }
@@ -25,10 +21,6 @@ int main(void)
 {
 	// The here order is important because it determines callback call order
 	usb_init();
-
-#ifndef NDEBUG
-	debug_init();
-#endif
 
 	reg_init();
 
@@ -46,10 +38,6 @@ int main(void)
 
 	// For now, the `gpio` param is ignored and all enabled GPIOs generate the irq
 	gpio_set_irq_enabled_with_callback(0xFF, 0, true, &gpio_irq);
-
-#ifndef NDEBUG
-	printf("Starting main loop\r\n");
-#endif
 
 	while (true) {
 		__wfe();
