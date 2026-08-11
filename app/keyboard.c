@@ -318,26 +318,6 @@ void keyboard_inject_event(char key, enum key_state state)
 	}
 }
 
-bool keyboard_is_key_down(char key)
-{
-	for (int32_t i = 0; i < LIST_SIZE; ++i) {
-		struct list_item *item = &self.list[i];
-
-		if (item->p_entry == NULL)
-			continue;
-
-		if ((item->state != KEY_STATE_PRESSED) && (item->state != KEY_STATE_HOLD))
-			continue;
-
-		if (item->effective_key != key)
-			continue;
-
-		return true;
-	}
-
-	return false;
-}
-
 bool keyboard_is_mod_on(enum key_mod mod)
 {
 	return self.mods[mod];
