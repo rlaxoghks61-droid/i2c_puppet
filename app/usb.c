@@ -99,9 +99,8 @@ static void key_cb(char key, enum key_state state)
 
 	if (key == KEY_MOD_ALT)
 	{
-		// ALT/SHIFT are tracked inside RP2040 and attached only to real key reports.
-		// Do not send raw modifier-only reports to Android, because Android treats
-		// ALT+H or ALT+SHIFT as language-switch shortcuts.
+		// Track ALT internally for local combos/key translation without emitting
+		// a standalone HID modifier report.
 		alt_pressed = (state != KEY_STATE_RELEASED);
 		return;
 	}
@@ -318,8 +317,8 @@ static void key_cb(char key, enum key_state state)
 		if (shr_pressed)
 			esp_modifier |= KEYBOARD_MODIFIER_RIGHTSHIFT;
 
-		// Send ALT only as part of an actual key press, not as a standalone modifier.
-		// Suppress ALT+H because Android uses it as a hidden language-switch shortcut.
+		// ALT is intentionally not applied to normal host key reports here;
+		// mapped ALT combinations such as ALT+Enter are handled above.
 	}
 
 	if (no_host_modifier)
