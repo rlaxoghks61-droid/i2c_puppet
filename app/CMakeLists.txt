@@ -9,6 +9,7 @@ add_executable(i2c_puppet
 	reg.c
 	touchpad.c
 	usb.c
+	usb_keepalive.c
 	esp_i2c.c
 	usb_descriptors.c
 )

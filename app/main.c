@@ -9,6 +9,7 @@
 #include "reg.h"
 #include "touchpad.h"
 #include "usb.h"
+#include "usb_keepalive.h"
 
 // since the SDK doesn't support per-GPIO irq, we use this global irq and forward it
 static void gpio_irq(uint gpio, uint32_t events)
@@ -30,6 +31,8 @@ int main(void)
 	gpioexp_init();
 
 	keyboard_init();
+
+	usb_keepalive_init();
 
 	touchpad_init();
 
