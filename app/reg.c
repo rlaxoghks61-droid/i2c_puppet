@@ -161,7 +161,7 @@ return self.regs[reg];
 void reg_set_value(enum reg_id reg, uint8_t value)
 {
 #ifdef DEBUG_REGS
-printf("%s: reg: 0x%02X, val: 0x%02X (%d)\r\n", func, reg, value, value);
+printf("%s: reg: 0x%02X, val: 0x%02X (%d)\r\n", __func__, reg, value, value);
 #endif
 
 self.regs[reg] = value;
@@ -176,7 +176,7 @@ return self.regs[reg] & bit;
 void reg_set_bit(enum reg_id reg, uint8_t bit)
 {
 #ifdef DEBUG_REGS
-printf("%s: reg: 0x%02X, bit: %d\r\n", func, reg, bit);
+printf("%s: reg: 0x%02X, bit: %d\r\n", __func__, reg, bit);
 #endif
 
 self.regs[reg] |= bit;
@@ -186,7 +186,7 @@ self.regs[reg] |= bit;
 void reg_clear_bit(enum reg_id reg, uint8_t bit)
 {
 #ifdef DEBUG_REGS
-printf("%s: reg: 0x%02X, bit: %d\r\n", func, reg, bit);
+printf("%s: reg: 0x%02X, bit: %d\r\n", __func__, reg, bit);
 #endif
 
 self.regs[reg] &= ~bit;
