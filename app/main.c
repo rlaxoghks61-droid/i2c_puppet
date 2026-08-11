@@ -41,7 +41,7 @@ int main(void)
 	gpio_set_irq_enabled_with_callback(0xFF, 0, true, &gpio_irq);
 
 	while (true) {
-		__wfe();
+		__WFE();
 	}
 
 	return 0;
