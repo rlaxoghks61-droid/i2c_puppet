@@ -8,6 +8,7 @@
 #include <pico/stdlib.h>
 
 #define REG_ID_INVALID		0x00
+#define PUPPET_I2C_BAUDRATE	(400 * 1000)
 
 static i2c_inst_t *i2c_instances[2] = { i2c0, i2c1 };
 
@@ -82,7 +83,7 @@ void puppet_i2c_init(void)
 {
 	self.i2c = i2c_instances[(PIN_PUPPET_SCL / 2) % 2];
 
-	i2c_init(self.i2c, 100 * 1000);
+	i2c_init(self.i2c, PUPPET_I2C_BAUDRATE);
 	puppet_i2c_sync_address();
 
 	gpio_set_function(PIN_PUPPET_SDA, GPIO_FUNC_I2C);
