@@ -4,7 +4,6 @@
 
 #define EPNUM_HID_KEYBOARD		0x81
 #define EPNUM_HID_MOUSE			0x82
-#define EPNUM_HID_GENERIC		0x83
 #define EPNUM_HID_CONSUMER 0x87
 
 #define EPNUM_VENDOR_IN			0x84
@@ -27,7 +26,7 @@ char const *string_descriptors[] =
 	"123456",						// 3: Serials, should use chip ID
 	"Keyboard Interface",			// 4: Interface 1 String
 	"Mouse Interface",				// 5: Interface 2 String
-	"HID Interface",				// 6: Interface 3 String
+	"Consumer Interface",			// 6: Interface 3 String
 	"CDC Interface",				// 7: Interface 4 String
 };
 
