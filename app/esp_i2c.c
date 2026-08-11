@@ -1,10 +1,7 @@
 #include "esp_i2c.h"
-#include "app_config.h"
-
-#include <pico/stdlib.h>
+#include "interrupt.h"
 
 #define QUEUE_SIZE 32
-#define ESP_INT_PIN PIN_INT
 
 struct esp_event_packet
 {
@@ -18,19 +15,14 @@ static volatile struct esp_event_packet queue[QUEUE_SIZE];
 static volatile uint8_t head = 0;
 static volatile uint8_t tail = 0;
 
-static void update_int_pin(void)
+static void update_int_line(void)
 {
-	if (head == tail)
-		gpio_put(ESP_INT_PIN, 1);  // queue empty
-	else
-		gpio_put(ESP_INT_PIN, 0);  // event waiting
+	interrupt_set_esp_pending(head != tail);
 }
 
 void esp_i2c_init(void)
 {
-	gpio_init(ESP_INT_PIN);
-	gpio_set_dir(ESP_INT_PIN, GPIO_OUT);
-	gpio_put(ESP_INT_PIN, 1);
+	update_int_line();
 }
 
 static void push_event(uint8_t type, uint8_t a, uint8_t b, uint8_t c)
@@ -49,7 +41,7 @@ static void push_event(uint8_t type, uint8_t a, uint8_t b, uint8_t c)
 
 	head = next;
 
-	update_int_pin();
+	update_int_line();
 }
 
 void esp_i2c_push_hid(uint8_t modifier, uint8_t keycode, uint8_t state)
@@ -92,7 +84,7 @@ void esp_i2c_pop_key(uint8_t *buffer, uint8_t *len)
 		buffer[3] = 0;
 		*len = 4;
 
-		update_int_pin();
+		update_int_line();
 		return;
 	}
 
@@ -105,5 +97,5 @@ void esp_i2c_pop_key(uint8_t *buffer, uint8_t *len)
 
 	*len = 4;
 
-	update_int_pin();
+	update_int_line();
 }
