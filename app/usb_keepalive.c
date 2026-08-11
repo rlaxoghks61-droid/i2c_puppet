@@ -11,7 +11,7 @@
 #include <tusb.h>
 
 #define USB_KEEPALIVE_IRQ 30
-#define USB_KEEPALIVE_INTERVAL_US 5000000
+#define USB_KEEPALIVE_INTERVAL_US 10000000
 #define USB_KEEPALIVE_ACTIVITY_GUARD_MS 100
 
 static volatile uint8_t keys_down = 0;
