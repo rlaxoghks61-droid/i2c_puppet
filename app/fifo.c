@@ -14,13 +14,6 @@ uint8_t fifo_count(void)
 	return self.count;
 }
 
-void fifo_flush(void)
-{
-	self.write_idx = 0;
-	self.read_idx = 0;
-	self.count = 0;
-}
-
 bool fifo_enqueue(const struct fifo_item item)
 {
 	if (self.count >= KEY_FIFO_SIZE)
