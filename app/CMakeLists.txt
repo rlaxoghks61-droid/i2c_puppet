@@ -1,6 +1,5 @@
 add_executable(i2c_puppet
 	backlight.c
-	debug.c
 	fifo.c
 	gpioexp.c
 	puppet_i2c.c
