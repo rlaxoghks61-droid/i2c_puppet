@@ -6,7 +6,41 @@
 #include "reg.h"
 #include "touchpad.h"
 
+#include <hardware/sync.h>
 #include <pico/stdlib.h>
+
+#define INT_SOURCE_PULSE (1u << 0)
+#define INT_SOURCE_ESP   (1u << 1)
+
+static volatile uint32_t int_sources = 0;
+static bool int_line_initialized = false;
+
+static void set_int_source(uint32_t source, bool active)
+{
+	const uint32_t irq_state = save_and_disable_interrupts();
+
+	if (active)
+		int_sources |= source;
+	else
+		int_sources &= ~source;
+
+	if (int_line_initialized)
+		gpio_put(PIN_INT, int_sources ? 0 : 1);
+
+	restore_interrupts(irq_state);
+}
+
+void interrupt_set_esp_pending(bool pending)
+{
+	set_int_source(INT_SOURCE_ESP, pending);
+}
+
+static void pulse_int_line(void)
+{
+	set_int_source(INT_SOURCE_PULSE, true);
+	busy_wait_ms(reg_get_value(REG_ID_IND));
+	set_int_source(INT_SOURCE_PULSE, false);
+}
 
 static void key_cb(char key, enum key_state state)
 {
@@ -17,10 +51,7 @@ static void key_cb(char key, enum key_state state)
 		return;
 
 	reg_set_bit(REG_ID_INT, INT_KEY);
-
-	gpio_put(PIN_INT, 0);
-	busy_wait_ms(reg_get_value(REG_ID_IND));
-	gpio_put(PIN_INT, 1);
+	pulse_int_line();
 }
 static struct key_callback key_callback = { .func = key_cb };
 
@@ -38,11 +69,8 @@ static void key_lock_cb(bool caps_changed, bool num_changed)
 		do_int = true;
 	}
 
-	if (do_int) {
-		gpio_put(PIN_INT, 0);
-		busy_wait_ms(reg_get_value(REG_ID_IND));
-		gpio_put(PIN_INT, 1);
-	}
+	if (do_int)
+		pulse_int_line();
 }
 static struct key_lock_callback key_lock_callback = { .func = key_lock_cb };
 
@@ -55,10 +83,7 @@ static void touch_cb(int8_t x, int8_t y)
 		return;
 
 	reg_set_bit(REG_ID_INT, INT_TOUCH);
-
-	gpio_put(PIN_INT, 0);
-	busy_wait_ms(reg_get_value(REG_ID_IND));
-	gpio_put(PIN_INT, 1);
+	pulse_int_line();
 }
 static struct touch_callback touch_callback = { .func = touch_cb };
 
@@ -71,19 +96,22 @@ static void gpioexp_cb(uint8_t gpio, uint8_t gpio_idx)
 
 	reg_set_bit(REG_ID_INT, INT_GPIO);
 	reg_set_bit(REG_ID_GIN, (1 << gpio_idx));
-
-	gpio_put(PIN_INT, 0);
-	busy_wait_ms(reg_get_value(REG_ID_IND));
-	gpio_put(PIN_INT, 1);
+	pulse_int_line();
 }
 static struct gpioexp_callback gpioexp_callback = { .func = gpioexp_cb };
 
 void interrupt_init(void)
 {
+	const uint32_t irq_state = save_and_disable_interrupts();
+
 	gpio_init(PIN_INT);
 	gpio_set_dir(PIN_INT, GPIO_OUT);
 	gpio_pull_up(PIN_INT);
-	gpio_put(PIN_INT, true);
+
+	int_line_initialized = true;
+	gpio_put(PIN_INT, int_sources ? 0 : 1);
+
+	restore_interrupts(irq_state);
 
 	keyboard_add_key_callback(&key_callback);
 	keyboard_add_lock_callback(&key_lock_callback);
