@@ -9,25 +9,11 @@
 
 #define DEV_ADDR			0x3B
 
-#define REG_PID				0x00
-#define REG_REV				0x01
 #define REG_MOTION			0x02
 #define REG_DELTA_X			0x03
 #define REG_DELTA_Y			0x04
-#define REG_DELTA_XY_H		0x05
-#define REG_CONFIG			0x11
-#define REG_OBSERV			0x2E
-#define REG_MBURST			0x42
 
 #define BIT_MOTION_MOT		(1 << 7)
-#define BIT_MOTION_OVF		(1 << 4)
-
-#define BIT_CONFIG_HIRES	(1 << 7)
-
-#define BIT_OBSERV_RUN		(0 << 6)
-#define BIT_OBSERV_REST1	(1 << 6)
-#define BIT_OBSERV_REST2	(2 << 6)
-#define BIT_OBSERV_REST3	(3 << 6)
 
 #define SWIPE_COOLDOWN_TIME_MS	100 // time to wait before generating a new swipe event
 #define SWIPE_RELEASE_DELAY_MS	10  // time to wait before sending key release event
@@ -51,12 +37,6 @@ static uint8_t read_register8(uint8_t reg)
 
 	return val;
 }
-
-//static void write_register8(uint8_t reg, uint8_t val)
-//{
-//	uint8_t buffer[2] = { reg, val };
-//	i2c_write_blocking(self.i2c, DEV_ADDR, buffer, sizeof(buffer), false);
-//}
 
 int64_t release_key(alarm_id_t id, void *user_data)
 {
