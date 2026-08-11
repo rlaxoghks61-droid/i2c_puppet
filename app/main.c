@@ -1,4 +1,5 @@
 #include <pico/stdlib.h>
+#include <RP2040.h>
 
 #include "backlight.h"
 #include "gpioexp.h"
