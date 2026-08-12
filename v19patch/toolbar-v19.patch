@@ -1,0 +1,156 @@
+diff -ruN v18orig/app/build.gradle.kts v19src/app/build.gradle.kts
+--- v18orig/app/build.gradle.kts	2026-08-12 06:08:54.000000000 +0000
++++ v19src/app/build.gradle.kts	2026-08-12 06:27:26.367970941 +0000
+@@ -10,8 +10,8 @@
+         applicationId = "com.bbq20kbd.toolbar.test"
+         minSdk = 31
+         targetSdk = 36
+-        versionCode = 20
+-        versionName = "2.7"
++        versionCode = 21
++        versionName = "2.8"
+     }
+ 
+     compileOptions {
+diff -ruN v18orig/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java v19src/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java
+--- v18orig/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java	2026-08-12 05:39:54.000000000 +0000
++++ v19src/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java	2026-08-12 06:27:26.367876290 +0000
+@@ -78,6 +78,14 @@
+     public void onAccessibilityEvent(AccessibilityEvent event) {
+         if (event == null) return;
+         int type = event.getEventType();
++
++        // A navigation gesture (Back/Home/Recents) changes the active/system window.
++        // Keep the toolbar itself visible, but dismiss any open toolbar popup.
++        if (type == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
++                type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
++            ToolbarService.dismissOpenPanelFromSystemWindowChange(event.getPackageName());
++        }
++
+         if (type != AccessibilityEvent.TYPE_VIEW_FOCUSED &&
+                 type != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED &&
+                 type != AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED &&
+diff -ruN v18orig/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java v19src/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java
+--- v18orig/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java	2026-08-12 06:08:54.000000000 +0000
++++ v19src/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java	2026-08-12 06:27:26.367725716 +0000
+@@ -26,6 +26,7 @@
+ import android.provider.MediaStore;
+ import android.os.Handler;
+ import android.os.Looper;
++import android.os.SystemClock;
+ import android.util.Log;
+ import android.provider.Settings;
+ import android.text.TextUtils;
+@@ -50,6 +51,7 @@
+ 
+ public class ToolbarService extends Service implements InputManager.InputDeviceListener, DisplayManager.DisplayListener {
+     private static final String TAG = "HWKeyboardToolbar";
++    private static volatile ToolbarService instance;
+     public static final String EXTRA_DISPLAY_ID = "display_id";
+     public static final String EXTRA_CAPTURED_CLIPBOARD = "captured_clipboard";
+     public static final String EXTRA_CAPTURED_IMAGE_PATH = "captured_image_path";
+@@ -123,6 +125,7 @@
+     private long lastScreenshotMediaId = -1L;
+     private final Runnable scanScreenshotRunnable = this::scanNewestScreenshot;
+     private final Handler mainHandler = new Handler(Looper.getMainLooper());
++    private long panelShownUptimeMs;
+ 
+     private static final class ClipboardEntry {
+         static final String TYPE_TEXT = "text";
+@@ -146,6 +149,7 @@
+     @Override
+     public void onCreate() {
+         super.onCreate();
++        instance = this;
+         inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);
+         displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
+         if (displayManager != null) displayManager.registerDisplayListener(this, null);
+@@ -186,6 +190,7 @@
+ 
+     @Override
+     public void onDestroy() {
++        if (instance == this) instance = null;
+         if (inputManager != null) inputManager.unregisterInputDeviceListener(this);
+         if (displayManager != null) displayManager.unregisterDisplayListener(this);
+         if (clipboardManager != null && clipListener != null) {
+@@ -392,30 +397,16 @@
+     private void addToolbarClipboardButton(LinearLayout bar, int color, View.OnClickListener listener) {
+         FrameLayout button = toolbarButtonShell("클립보드", listener);
+ 
+-        // Samsung-style clipboard: the small clip sits fully INSIDE the sheet outline.
+-        // Keeping the clip as a child of the sheet prevents it from protruding above
+-        // the outer rectangle and looking like a file-folder tab.
+-        FrameLayout sheet = new FrameLayout(uiContext());
+-        GradientDrawable sheetBg = new GradientDrawable();
+-        sheetBg.setColor(Color.TRANSPARENT);
+-        sheetBg.setStroke(dp(2), color);
+-        sheetBg.setCornerRadius(dp(3));
+-        sheet.setBackground(sheetBg);
+-        FrameLayout.LayoutParams sheetLp = new FrameLayout.LayoutParams(dp(13), dp(16));
+-        sheetLp.gravity = Gravity.CENTER;
+-        sheetLp.topMargin = dp(2);
+-        button.addView(sheet, sheetLp);
+-
+-        View clip = new View(uiContext());
+-        GradientDrawable clipBg = new GradientDrawable();
+-        clipBg.setColor(Color.TRANSPARENT);
+-        clipBg.setStroke(dp(2), color);
+-        clipBg.setCornerRadius(dp(2));
+-        clip.setBackground(clipBg);
+-        FrameLayout.LayoutParams clipLp = new FrameLayout.LayoutParams(dp(7), dp(4));
+-        clipLp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+-        clipLp.topMargin = dp(2);
+-        sheet.addView(clip, clipLp);
++        // Plain empty rectangle, matching the requested minimal clipboard glyph.
++        View rectangle = new View(uiContext());
++        GradientDrawable rectangleBg = new GradientDrawable();
++        rectangleBg.setColor(Color.TRANSPARENT);
++        rectangleBg.setStroke(dp(2), color);
++        rectangleBg.setCornerRadius(dp(2));
++        rectangle.setBackground(rectangleBg);
++        FrameLayout.LayoutParams rectangleLp = new FrameLayout.LayoutParams(dp(14), dp(17));
++        rectangleLp.gravity = Gravity.CENTER;
++        button.addView(rectangle, rectangleLp);
+ 
+         bar.addView(button, new LinearLayout.LayoutParams(0, WindowManager.LayoutParams.MATCH_PARENT, 1f));
+     }
+@@ -432,6 +423,20 @@
+         return button;
+     }
+ 
++    public static void dismissOpenPanelFromSystemWindowChange(CharSequence packageName) {
++        ToolbarService service = instance;
++        if (service == null || service.panel == null) return;
++        if (packageName != null && TextUtils.equals(packageName, service.getPackageName())) return;
++        if (SystemClock.uptimeMillis() - service.panelShownUptimeMs < 250L) return;
++
++        service.mainHandler.post(() -> {
++            if (service != instance || service.panel == null) return;
++            if (SystemClock.uptimeMillis() - service.panelShownUptimeMs < 250L) return;
++            service.hidePanel();
++            Log.d(TAG, "Panel dismissed after external/system window change: " + packageName);
++        });
++    }
++
+     private boolean preparePanel(String key) {
+     if (panel != null && key.equals(activePanelKey)) {
+         hidePanel();
+@@ -1024,6 +1029,7 @@
+         try {
+             windowManager.addView(content, lp);
+             panel = content;
++            panelShownUptimeMs = SystemClock.uptimeMillis();
+         } catch (Exception e) {
+             Log.e(TAG, "Panel addView failed on display=" + overlayDisplayId, e);
+             panel = null;
+diff -ruN v18orig/app/src/main/res/xml/accessibility_service_config.xml v19src/app/src/main/res/xml/accessibility_service_config.xml
+--- v18orig/app/src/main/res/xml/accessibility_service_config.xml	2026-08-12 05:04:55.000000000 +0000
++++ v19src/app/src/main/res/xml/accessibility_service_config.xml	2026-08-12 06:27:26.367931693 +0000
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+-    android:accessibilityEventTypes="typeViewFocused|typeViewTextChanged|typeViewTextSelectionChanged|typeWindowStateChanged|typeWindowContentChanged"
++    android:accessibilityEventTypes="typeViewFocused|typeViewTextChanged|typeViewTextSelectionChanged|typeWindowStateChanged|typeWindowsChanged|typeWindowContentChanged"
+     android:accessibilityFeedbackType="feedbackGeneric"
+     android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagInputMethodEditor"
+     android:canRetrieveWindowContent="true"
