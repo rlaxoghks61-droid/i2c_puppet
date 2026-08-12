@@ -6,6 +6,7 @@ on:
     branches: [ "hw-keyboard-toolbar-final" ]
     paths:
       - ".github/workflows/build-hw-toolbar.yml"
+      - "toolbar-v6-overrides.tar.gz.b64"
 
 jobs:
   build:
@@ -28,49 +29,14 @@ jobs:
         run: git show dcdb6004fee243751ae70d5e172583533dea8b35:android-toolbar.zip > android-toolbar.zip
       - name: Unpack project
         run: mkdir -p android-toolbar && unzip -q android-toolbar.zip -d android-toolbar
-      - name: Patch toolbar for Flip5 cover display
+      - name: Apply v6 functional overrides
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path('android-toolbar/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java')
-          s = p.read_text()
-          s = s.replace('import android.hardware.input.InputManager;\n', 'import android.hardware.input.InputManager;\nimport android.hardware.display.DisplayManager;\n')
-          s = s.replace('import android.os.IBinder;\n', 'import android.os.IBinder;\nimport android.util.Log;\n')
-          s = s.replace('import android.view.Gravity;\n', 'import android.view.Display;\nimport android.view.Gravity;\n')
-          s = s.replace('public class ToolbarService extends Service implements InputManager.InputDeviceListener {', 'public class ToolbarService extends Service implements InputManager.InputDeviceListener, DisplayManager.DisplayListener {')
-          s = s.replace('    private static final int TOOLBAR_HEIGHT_DP = 36;\n', '    private static final String TAG = "HWKeyboardToolbar";\n    public static final String EXTRA_DISPLAY_ID = "display_id";\n    private static final int TOOLBAR_HEIGHT_DP = 36;\n')
-          s = s.replace('    private InputManager inputManager;\n    private WindowManager windowManager;\n', '    private InputManager inputManager;\n    private DisplayManager displayManager;\n    private Context overlayContext;\n    private WindowManager windowManager;\n    private int overlayDisplayId = Display.INVALID_DISPLAY;\n    private int preferredDisplayId = Display.INVALID_DISPLAY;\n')
-          s = s.replace('        inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);\n        windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);\n', '        inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);\n        displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);\n        if (displayManager != null) displayManager.registerDisplayListener(this, null);\n        refreshWindowManager();\n')
-          s = s.replace('    public int onStartCommand(Intent intent, int flags, int startId) {\n        updateToolbar();\n', '    public int onStartCommand(Intent intent, int flags, int startId) {\n        if (intent != null && intent.hasExtra(EXTRA_DISPLAY_ID)) {\n            preferredDisplayId = intent.getIntExtra(EXTRA_DISPLAY_ID, Display.INVALID_DISPLAY);\n        }\n        refreshWindowManager();\n        updateToolbar();\n')
-          s = s.replace('        if (inputManager != null) inputManager.unregisterInputDeviceListener(this);\n', '        if (inputManager != null) inputManager.unregisterInputDeviceListener(this);\n        if (displayManager != null) displayManager.unregisterDisplayListener(this);\n')
-          s = s.replace('    @Override public void onInputDeviceChanged(int deviceId) { updateToolbar(); }\n\n    private void updateToolbar() {', '''    @Override public void onInputDeviceChanged(int deviceId) { updateToolbar(); }\n\n    @Override public void onDisplayAdded(int displayId) {\n        refreshWindowManager();\n        updateToolbar();\n    }\n\n    @Override public void onDisplayRemoved(int displayId) {\n        refreshWindowManager();\n        updateToolbar();\n    }\n\n    @Override public void onDisplayChanged(int displayId) {\n        refreshWindowManager();\n        updateToolbar();\n    }\n\n    private void refreshWindowManager() {\n        Display target = chooseTargetDisplay();\n        int newId = target == null ? Display.INVALID_DISPLAY : target.getDisplayId();\n        if (newId == overlayDisplayId && windowManager != null) return;\n\n        hidePanel();\n        hideToolbar();\n        overlayContext = null;\n        windowManager = null;\n        overlayDisplayId = Display.INVALID_DISPLAY;\n\n        if (target == null) {\n            Log.i(TAG, "No active cover display available");\n            return;\n        }\n\n        try {\n            Context displayContext = createDisplayContext(target);\n            overlayContext = displayContext.createWindowContext(\n                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null);\n            windowManager = (WindowManager) overlayContext.getSystemService(Context.WINDOW_SERVICE);\n            overlayDisplayId = target.getDisplayId();\n            android.util.DisplayMetrics dm = new android.util.DisplayMetrics();\n            target.getRealMetrics(dm);\n            Log.i(TAG, "Overlay context ready: display=" + overlayDisplayId +\n                    " size=" + dm.widthPixels + "x" + dm.heightPixels +\n                    " state=" + target.getState());\n        } catch (Exception e) {\n            Log.e(TAG, "Failed to create overlay context for display=" + newId, e);\n            overlayContext = null;\n            windowManager = null;\n            overlayDisplayId = Display.INVALID_DISPLAY;\n        }\n    }\n\n    private Display chooseTargetDisplay() {\n        if (displayManager == null) return null;\n\n        if (preferredDisplayId != Display.INVALID_DISPLAY) {\n            Display preferred = displayManager.getDisplay(preferredDisplayId);\n            if (isUsableCoverDisplay(preferred)) return preferred;\n        }\n\n        Display best = null;\n        long bestArea = Long.MAX_VALUE;\n        for (Display d : displayManager.getDisplays()) {\n            if (!isUsableCoverDisplay(d)) continue;\n            android.util.DisplayMetrics dm = new android.util.DisplayMetrics();\n            d.getRealMetrics(dm);\n            long area = (long) dm.widthPixels * (long) dm.heightPixels;\n            if (area < bestArea) {\n                best = d;\n                bestArea = area;\n            }\n        }\n        return best;\n    }\n\n    private boolean isUsableCoverDisplay(Display d) {\n        if (d == null || d.getDisplayId() == Display.DEFAULT_DISPLAY || d.getState() == Display.STATE_OFF) return false;\n        android.util.DisplayMetrics dm = new android.util.DisplayMetrics();\n        d.getRealMetrics(dm);\n        int min = Math.min(dm.widthPixels, dm.heightPixels);\n        int max = Math.max(dm.widthPixels, dm.heightPixels);\n        return max > 0 && ((float) min / (float) max) >= 0.70f;\n    }\n\n    private Context uiContext() {\n        return overlayContext != null ? overlayContext : this;\n    }\n\n    private void updateToolbar() {''')
-          s = s.replace('        if (!Settings.canDrawOverlays(this) || !hasExternalAlphabeticKeyboard() || !isCoverLikeDisplay()) {', '        if (!Settings.canDrawOverlays(this) || !hasExternalAlphabeticKeyboard() || windowManager == null || !isCoverLikeDisplay()) {')
-          start = s.index('    private boolean isCoverLikeDisplay() {')
-          end = s.index('\n    private void showToolbar()', start)
-          s = s[:start] + '''    private boolean isCoverLikeDisplay() {\n        if (overlayContext == null) return false;\n        Display d = overlayContext.getDisplay();\n        if (d == null || d.getState() == Display.STATE_OFF) return false;\n        android.util.DisplayMetrics dm = new android.util.DisplayMetrics();\n        d.getRealMetrics(dm);\n        int min = Math.min(dm.widthPixels, dm.heightPixels);\n        int max = Math.max(dm.widthPixels, dm.heightPixels);\n        return max > 0 && ((float) min / (float) max) >= 0.70f;\n    }\n''' + s[end:]
-          for cls in ['LinearLayout','TextView','ScrollView','GridLayout']:
-              s = s.replace(f'new {cls}(this)', f'new {cls}(uiContext())')
-          s = s.replace('(getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)', '(uiContext().getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)')
-          s = s.replace('return Math.round(value * getResources().getDisplayMetrics().density);', 'return Math.round(value * uiContext().getResources().getDisplayMetrics().density);')
-          s = s.replace('            windowManager.addView(bar, lp);\n            toolbar = bar;\n        } catch (Exception ignored) {\n            toolbar = null;\n        }', '            windowManager.addView(bar, lp);\n            toolbar = bar;\n            Log.i(TAG, "Toolbar added on display=" + overlayDisplayId);\n        } catch (Exception e) {\n            Log.e(TAG, "Toolbar addView failed on display=" + overlayDisplayId, e);\n            toolbar = null;\n        }')
-          s = s.replace('            windowManager.addView(content, lp);\n            panel = content;\n        } catch (Exception ignored) {\n            panel = null;\n        }', '            windowManager.addView(content, lp);\n            panel = content;\n        } catch (Exception e) {\n            Log.e(TAG, "Panel addView failed on display=" + overlayDisplayId, e);\n            panel = null;\n        }')
-          p.write_text(s)
-
-          p = Path('android-toolbar/app/src/main/java/com/bbq20kbd/toolbar/test/MainActivity.java')
-          s = p.read_text()
-          s = s.replace('import android.view.Gravity;\n', 'import android.view.Display;\nimport android.view.Gravity;\n')
-          s = s.replace('            startService(new Intent(this, ToolbarService.class));', '''            Intent service = new Intent(this, ToolbarService.class);\n            Display display = getDisplay();\n            if (display != null) service.putExtra(ToolbarService.EXTRA_DISPLAY_ID, display.getDisplayId());\n            startService(service);''')
-          p.write_text(s)
-
-          b = Path('android-toolbar/app/build.gradle.kts')
-          t = b.read_text().replace('versionCode = 4', 'versionCode = 5').replace('versionName = "1.0"', 'versionName = "1.1"')
-          b.write_text(t)
-          PY
+          base64 -d toolbar-v6-overrides.tar.gz.b64 > toolbar-v6-overrides.tar.gz
+          tar -xzf toolbar-v6-overrides.tar.gz -C android-toolbar
       - name: Build
         working-directory: android-toolbar
         run: gradle :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: HardwareKeyboardToolbar-CoverDisplay
+          name: HardwareKeyboardToolbar-v6
           path: android-toolbar/app/build/outputs/apk/debug/app-debug.apk
