@@ -13,17 +13,7 @@
      compileOptions {
 --- a/app/src/main/java/com/bbq20kbd/toolbar/test/MainActivity.java
 +++ b/app/src/main/java/com/bbq20kbd/toolbar/test/MainActivity.java
-@@ -35,8 +35,7 @@
- 
-         TextView info = new TextView(this);
-         info.setText("외장 하드웨어 키보드가 연결된 커버 화면에서 자동으로 표시됩니다.\n\n" +
--                "오버레이 권한은 툴바 표시용이고, 접근성 권한은 툴바 입력용입니다. " +
--                "스크린샷 자동 클립보드는 전원+볼륨↓로 저장되는 새 스크린샷을 감지하기 위해 사진 접근 권한이 필요합니다.");
-+                "오버레이 권한은 툴바 표시용이고, 접근성 권한은 툴바 입력용입니다.");
-         info.setTextColor(Color.DKGRAY);
-         info.setTextSize(15f);
-         LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(-1, -2);
-@@ -57,12 +56,6 @@
+@@ -57,12 +57,6 @@
          lp2.topMargin = dp(8);
          root.addView(accessibility, lp2);
  
