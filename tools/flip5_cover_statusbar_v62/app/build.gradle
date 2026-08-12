@@ -1,0 +1,32 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.flip5.coverstatusbar'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.flip5.coverstatusbar'
+        minSdk 26
+        targetSdk 28
+        versionCode 62
+        versionName '6.2'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
