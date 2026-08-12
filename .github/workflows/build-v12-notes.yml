@@ -1,0 +1,160 @@
+name: Build v12 Samsung Notes fix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "hw-keyboard-toolbar-final" ]
+    paths:
+      - ".github/workflows/build-v12-notes.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Restore v11 source
+        run: |
+          git show dcdb6004fee243751ae70d5e172583533dea8b35:android-toolbar.zip > android-toolbar.zip
+          mkdir -p android-toolbar
+          unzip -q android-toolbar.zip -d android-toolbar
+          cat v11b/part*.txt > toolbar-v11-overrides.tar.gz.b64
+          base64 -d toolbar-v11-overrides.tar.gz.b64 > toolbar-v11-overrides.tar.gz
+          tar -xzf toolbar-v11-overrides.tar.gz -C android-toolbar
+      - name: Patch Samsung Notes input
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android-toolbar/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java')
+          s = p.read_text()
+          if 'import android.util.Log;' not in s:
+              s = s.replace('import android.text.TextUtils;\n', 'import android.text.TextUtils;\nimport android.util.Log;\n')
+          s = s.replace('public class KeyboardAccessibilityService extends AccessibilityService {\n', 'public class KeyboardAccessibilityService extends AccessibilityService {\n    private static final String TAG = "HWKeyboardInput";\n', 1)
+
+          a = s.index('    private AccessibilityNodeInfo focusedEditableNode() {')
+          b = s.index('    private String nodeKey(AccessibilityNodeInfo node) {')
+          s = s[:a] + '''    private AccessibilityNodeInfo focusedEditableNode() {
+              AccessibilityNodeInfo root = getRootInActiveWindow();
+              if (root == null) return null;
+              AccessibilityNodeInfo node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+              if (isUsableInputNode(node)) return node;
+              AccessibilityNodeInfo focused = findFocusedInput(root);
+              if (focused != null) return focused;
+              AccessibilityNodeInfo actionable = findActionableInput(root);
+              return actionable != null ? actionable : node;
+          }
+
+          private boolean isUsableInputNode(AccessibilityNodeInfo node) {
+              return node != null && (node.isEditable() || supportsAction(node, AccessibilityNodeInfo.ACTION_SET_TEXT) || supportsAction(node, AccessibilityNodeInfo.ACTION_PASTE));
+          }
+
+          private boolean supportsAction(AccessibilityNodeInfo node, int id) {
+              if (node == null) return false;
+              for (AccessibilityNodeInfo.AccessibilityAction action : node.getActionList()) {
+                  if (action != null && action.getId() == id) return true;
+              }
+              return (node.getActions() & id) != 0;
+          }
+
+          private AccessibilityNodeInfo findFocusedInput(AccessibilityNodeInfo node) {
+              if (node == null) return null;
+              if ((node.isFocused() || node.isAccessibilityFocused()) && isUsableInputNode(node)) return node;
+              for (int i = 0; i < node.getChildCount(); i++) {
+                  AccessibilityNodeInfo found = findFocusedInput(node.getChild(i));
+                  if (found != null) return found;
+              }
+              return null;
+          }
+
+          private AccessibilityNodeInfo findActionableInput(AccessibilityNodeInfo node) {
+              if (node == null) return null;
+              for (int i = 0; i < node.getChildCount(); i++) {
+                  AccessibilityNodeInfo found = findActionableInput(node.getChild(i));
+                  if (found != null) return found;
+              }
+              if (supportsAction(node, AccessibilityNodeInfo.ACTION_PASTE) || supportsAction(node, AccessibilityNodeInfo.ACTION_SET_TEXT)) return node;
+              return null;
+          }
+
+          private boolean tryPasteNode(AccessibilityNodeInfo node) {
+              if (node == null) return false;
+              try {
+                  if (!node.isFocused()) node.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                  boolean ok = node.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+                  if (ok) Log.i(TAG, "paste success pkg=" + node.getPackageName() + " class=" + node.getClassName() + " editable=" + node.isEditable());
+                  return ok;
+              } catch (Exception e) {
+                  Log.w(TAG, "paste failed", e);
+                  return false;
+              }
+          }
+
+          private boolean pasteToBestNode(String text, AccessibilityNodeInfo preferred) {
+              ClipboardManager cb = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+              if (cb != null) cb.setPrimaryClip(ClipData.newPlainText("text", text));
+              if (tryPasteNode(preferred)) return true;
+              AccessibilityNodeInfo parent = preferred == null ? null : preferred.getParent();
+              for (int depth = 0; parent != null && depth < 6; depth++, parent = parent.getParent()) {
+                  if (tryPasteNode(parent)) return true;
+              }
+              AccessibilityNodeInfo root = getRootInActiveWindow();
+              AccessibilityNodeInfo candidate = findFocusedInput(root);
+              if (candidate != null && candidate != preferred && tryPasteNode(candidate)) return true;
+              candidate = findActionableInput(root);
+              return candidate != null && candidate != preferred && tryPasteNode(candidate);
+          }
+
+          ''' + s[b:]
+
+          old = '''        ClipboardManager cb = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                  if (cb != null) cb.setPrimaryClip(ClipData.newPlainText("text", insertion));
+                  return node.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+          '''
+          if old not in s:
+              raise SystemExit('insert fallback not found')
+          s = s.replace(old, '        return pasteToBestNode(insertion, node);\n', 1)
+
+          a = s.index('    public boolean pasteClipboard() {')
+          b = s.index('    public String getSelectedText() {')
+          paste = '''    public boolean pasteClipboard() {
+              AccessibilityNodeInfo node = focusedEditableNode();
+              if (node == null) return false;
+              syncBeforeToolbarEdit(node);
+              lastTextChangeMs = 0;
+              if (tryPasteNode(node)) return true;
+              AccessibilityNodeInfo parent = node.getParent();
+              for (int depth = 0; parent != null && depth < 6; depth++, parent = parent.getParent()) {
+                  if (tryPasteNode(parent)) return true;
+              }
+              AccessibilityNodeInfo root = getRootInActiveWindow();
+              AccessibilityNodeInfo candidate = findFocusedInput(root);
+              if (candidate != null && candidate != node && tryPasteNode(candidate)) return true;
+              candidate = findActionableInput(root);
+              return candidate != null && candidate != node && tryPasteNode(candidate);
+          }
+
+          '''
+          s = s[:a] + paste + s[b:]
+          p.write_text(s)
+
+          g = Path('android-toolbar/app/build.gradle.kts')
+          t = g.read_text().replace('versionCode = 12', 'versionCode = 13').replace('versionName = "1.8"', 'versionName = "1.9"')
+          g.write_text(t)
+          PY
+      - name: Build
+        working-directory: android-toolbar
+        run: gradle :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HardwareKeyboardToolbar-v12-SamsungNotesFix
+          path: android-toolbar/app/build/outputs/apk/debug/app-debug.apk
