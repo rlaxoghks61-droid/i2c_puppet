@@ -53,7 +53,6 @@ jobs:
                       FrameLayout.LayoutParams.WRAP_CONTENT,
                       BAR_HEIGHT_PX,
                       Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-              // v4.13-era visual position, nudged slightly left for the curved right edge.
               clusterLp.rightMargin = 18;
               root.addView(cluster, clusterLp);
 
@@ -84,7 +83,6 @@ jobs:
               battery.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
               LinearLayout.LayoutParams batteryLp = new LinearLayout.LayoutParams(
                       LinearLayout.LayoutParams.WRAP_CONTENT, BAR_HEIGHT_PX);
-              // Battery gets a little extra right gap so the text itself sits farther left.
               batteryLp.rightMargin = 10;
               cluster.addView(battery, batteryLp);
           }
@@ -135,9 +133,6 @@ jobs:
                   }
               } catch (Throwable ignored) {
               }
-
-              // Always keep a Wi-Fi glyph visible. Prefer the live Samsung variant,
-              // then fall back to the standard full-strength Samsung glyph.
               if (!setIcon(wifi, prefix + level, fg)) {
                   if (!setIcon(wifi, "stat_sys_wifi_signal_" + level, fg)) {
                       setIcon(wifi, "stat_sys_wifi_signal_4", fg);
@@ -170,8 +165,6 @@ jobs:
                   }
               } catch (Throwable ignored) {
               }
-
-              // Keep cellular bars and LTE badge visible at all times, per user preference.
               if (!setIcon(cell, "stat_sys_signal_" + level, fg)) {
                   if (!setIcon(cell, "stat_sys_signal_4", fg)) {
                       setIcon(cell, "stat_sys_signal_null_4", fg);
@@ -182,8 +175,8 @@ jobs:
 
           private void updateBattery() {'''
           s, n = re.subn(
-              r'    private void updateCell\(int fg\) \{.*?    private void updateBattery\(\) \{',
-              new_cell,
+              r'\s*private void updateCell\(int fg\) \{.*?\s*private void updateBattery\(\) \{',
+              '\n' + new_cell,
               s,
               count=1,
               flags=re.S,
