@@ -1,4 +1,4 @@
-name: Build Flip5 Cover StatusBar v6.2
+name: Build Flip5 Cover StatusBar v6.3
 
 on:
   push:
@@ -29,6 +29,12 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Apply v6.3 position tuning
+        run: |
+          sed -i 's/RIGHT_SAFE_MARGIN_PX = 32/RIGHT_SAFE_MARGIN_PX = 6/' tools/flip5_cover_statusbar_v62/app/src/main/java/com/flip5/coverstatusbar/OverlayService.java
+          sed -i 's/versionCode 62/versionCode 63/' tools/flip5_cover_statusbar_v62/app/build.gradle
+          sed -i "s/versionName '6.2'/versionName '6.3'/" tools/flip5_cover_statusbar_v62/app/build.gradle
+
       - name: Build APK
         working-directory: tools/flip5_cover_statusbar_v62
         run: gradle :app:assembleRelease --stacktrace
@@ -36,5 +42,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Flip5CoverStatusBar-v6.2-FixedPosition-Sticky
+          name: Flip5CoverStatusBar-v6.3-RightEdge-FixedPosition-Sticky
           path: tools/flip5_cover_statusbar_v62/app/build/outputs/apk/release/*.apk
