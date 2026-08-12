@@ -1,0 +1,60 @@
+name: Build Hardware Keyboard Toolbar v17 Fixed Bottom
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "hw-keyboard-toolbar-final" ]
+    paths:
+      - ".github/workflows/build-v17-fixed-bottom.yml"
+      - "v17patch/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android 36 SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Restore v13 project
+        run: |
+          cat v13b/part*.txt > toolbar-v13-project.tar.gz.b64
+          base64 -d toolbar-v13-project.tar.gz.b64 > toolbar-v13-project.tar.gz
+          mkdir -p android-toolbar-v14
+          tar -xzf toolbar-v13-project.tar.gz -C android-toolbar-v14
+      - name: Reapply v14 base
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, base64
+          s = Path('.github/workflows/build-v14-final.yml').read_text()
+          m = re.search(r"echo '([^']+)' \| base64 -d > /tmp/patch_v14\.py", s)
+          if not m:
+              raise SystemExit('v14 patch payload not found')
+          Path('/tmp/patch_v14.py').write_bytes(base64.b64decode(m.group(1)))
+          PY
+          python3 /tmp/patch_v14.py
+      - name: Reapply v15 auto screenshot base
+        run: |
+          cat v15patch/part*.txt | base64 -d > /tmp/patch_v15.py
+          python3 /tmp/patch_v15.py
+      - name: Reapply v16 popup and clipboard fix
+        working-directory: android-toolbar-v14
+        run: patch -p1 < ../v16patch/toolbar-v16.patch
+      - name: Apply v17 fixed bottom and UI cleanup
+        working-directory: android-toolbar-v14
+        run: patch -p1 < ../v17patch/toolbar-v17.patch
+      - name: Build
+        working-directory: android-toolbar-v14
+        run: gradle :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HardwareKeyboardToolbar-v17-FixedBottom
+          path: android-toolbar-v14/app/build/outputs/apk/debug/app-debug.apk
