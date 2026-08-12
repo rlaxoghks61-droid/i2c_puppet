@@ -6,6 +6,7 @@ on:
     branches: [ "hw-keyboard-toolbar-final" ]
     paths:
       - ".github/workflows/build-v18-clipboard-icon.yml"
+      - "v18patch/**"
 
 jobs:
   build:
@@ -65,53 +66,7 @@ jobs:
           PY
       - name: Apply v18 clipboard icon fix
         working-directory: android-toolbar-v14
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          p = Path('app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java')
-          s = p.read_text()
-          pattern = r'    private void addToolbarClipboardButton\(LinearLayout bar, int color, View\.OnClickListener listener\) \{.*?\n    \}\n\n    private FrameLayout toolbarButtonShell'
-          replacement = '''    private void addToolbarClipboardButton(LinearLayout bar, int color, View.OnClickListener listener) {
-        FrameLayout button = toolbarButtonShell("클립보드", listener);
-
-        // Samsung-style clipboard: keep the small clip fully inside the outer sheet.
-        FrameLayout sheet = new FrameLayout(uiContext());
-        GradientDrawable sheetBg = new GradientDrawable();
-        sheetBg.setColor(Color.TRANSPARENT);
-        sheetBg.setStroke(dp(2), color);
-        sheetBg.setCornerRadius(dp(3));
-        sheet.setBackground(sheetBg);
-        FrameLayout.LayoutParams sheetLp = new FrameLayout.LayoutParams(dp(13), dp(16));
-        sheetLp.gravity = Gravity.CENTER;
-        sheetLp.topMargin = dp(2);
-        button.addView(sheet, sheetLp);
-
-        View clip = new View(uiContext());
-        GradientDrawable clipBg = new GradientDrawable();
-        clipBg.setColor(Color.TRANSPARENT);
-        clipBg.setStroke(dp(2), color);
-        clipBg.setCornerRadius(dp(2));
-        clip.setBackground(clipBg);
-        FrameLayout.LayoutParams clipLp = new FrameLayout.LayoutParams(dp(7), dp(4));
-        clipLp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        clipLp.topMargin = dp(2);
-        sheet.addView(clip, clipLp);
-
-        bar.addView(button, new LinearLayout.LayoutParams(0, WindowManager.LayoutParams.MATCH_PARENT, 1f));
-    }
-
-    private FrameLayout toolbarButtonShell'''
-          s2, n = re.subn(pattern, lambda m: replacement, s, count=1, flags=re.S)
-          if n != 1:
-              raise SystemExit('clipboard icon method not found')
-          p.write_text(s2)
-
-          b = Path('app/build.gradle.kts')
-          bs = b.read_text().replace('versionCode = 19', 'versionCode = 20').replace('versionName = "2.6"', 'versionName = "2.7"')
-          b.write_text(bs)
-          PY
+        run: patch -p1 < ../v18patch/toolbar-v18.patch
       - name: Build
         working-directory: android-toolbar-v14
         run: gradle :app:assembleDebug
