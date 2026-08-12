@@ -72,7 +72,6 @@ jobs:
               cluster.addView(cell, iconSlot(31, 31, 6));
               cell.setTranslationX(4f);
 
-              // Keep the old LTE/5G text slot removed completely.
               data = iconView();
               cluster.addView(data, iconSlot(0, 0, 0));
               data.setVisibility(View.INVISIBLE);
@@ -95,11 +94,8 @@ jobs:
           }
 
           private ImageView iconView() {'''
-          s, n = re.subn(
-              r'    private void buildViews\(\) \{.*?    private ImageView iconView\(\) \{',
-              new_build, s, count=1, flags=re.S)
-          if n != 1:
-              raise SystemExit('buildViews patch failed')
+          s, n = re.subn(r'    private void buildViews\(\) \{.*?    private ImageView iconView\(\) \{', new_build, s, count=1, flags=re.S)
+          if n != 1: raise SystemExit('buildViews patch failed')
 
           new_wifi = r'''    private void updateWifi(int fg) {
               WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
@@ -108,10 +104,7 @@ jobs:
                   hideButKeepSlot(wifi);
                   return;
               }
-
               try {
-                  // Do not use WifiInfo networkId/supplicant state here. On recent Android
-                  // those fields can be privacy-redacted even while Wi-Fi is connected.
                   boolean wifiConnected = false;
                   Network[] networks = cm.getAllNetworks();
                   if (networks != null) {
@@ -132,20 +125,16 @@ jobs:
                   int level = 4;
                   if (info != null) {
                       int rssi = info.getRssi();
-                      if (rssi != WifiInfo.INVALID_RSSI) {
+                      if (rssi > -127 && rssi < 0) {
                           level = WifiManager.calculateSignalLevel(rssi, 5);
                       }
                   }
                   if (level < 0) level = 0;
                   if (level > 4) level = 4;
-
-                  // Generic Samsung Wi-Fi resources have no Wi-Fi-generation text.
                   if (!setIcon(wifi, "stat_sys_wifi_signal_" + level, fg)) {
-                      // Never blank a connected Wi-Fi icon because one level drawable failed.
                       setIcon(wifi, "stat_sys_wifi_signal_4", fg);
                   }
               } catch (Throwable t) {
-                  // If Wi-Fi is on but status probing is restricted, preserve a visible glyph.
                   if (!setIcon(wifi, "stat_sys_wifi_signal_4", fg)) {
                       hideButKeepSlot(wifi);
                   }
@@ -153,24 +142,17 @@ jobs:
           }
 
           private void updateCell(int fg) {'''
-          s, n = re.subn(
-              r'    private void updateWifi\(int fg\) \{.*?    private void updateCell\(int fg\) \{',
-              new_wifi, s, count=1, flags=re.S)
-          if n != 1:
-              raise SystemExit('updateWifi patch failed')
+          s, n = re.subn(r'    private void updateWifi\(int fg\) \{.*?    private void updateCell\(int fg\) \{', new_wifi, s, count=1, flags=re.S)
+          if n != 1: raise SystemExit('updateWifi patch failed')
 
           new_cell = r'''    private void updateCell(int fg) {
               hideButKeepSlot(data);
-
               TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
               if (tm == null) {
                   showNoCellSignal(fg);
                   return;
               }
-
               try {
-                  // Use the active/default data subscription when possible. The process-wide
-                  // TelephonyManager can point at an inactive subscription on dual-SIM phones.
                   int subId = android.telephony.SubscriptionManager.getDefaultDataSubscriptionId();
                   if (android.telephony.SubscriptionManager.isValidSubscriptionId(subId)) {
                       tm = tm.createForSubscriptionId(subId);
@@ -190,32 +172,22 @@ jobs:
                   }
 
                   SignalStrength ss = null;
-                  if (Build.VERSION.SDK_INT >= 28) {
-                      ss = tm.getSignalStrength();
-                  }
+                  if (Build.VERSION.SDK_INT >= 28) ss = tm.getSignalStrength();
 
-                  // A null ServiceState alone is not enough to erase the icon. If signal
-                  // strength exists, use it. Otherwise keep a zero-bar antenna visible.
                   int level = 0;
                   if (ss != null) {
                       level = ss.getLevel();
                   } else if (state == null) {
-                      if (!setIcon(cell, "stat_sys_signal_0", fg)) {
-                          showNoCellSignal(fg);
-                      }
+                      if (!setIcon(cell, "stat_sys_signal_0", fg)) showNoCellSignal(fg);
                       return;
                   }
 
                   if (level < 0) level = 0;
                   if (level > 4) level = 4;
                   if (!setIcon(cell, "stat_sys_signal_" + level, fg)) {
-                      // Keep the cellular slot visible even if a particular level resource fails.
-                      if (!setIcon(cell, "stat_sys_signal_0", fg)) {
-                          showNoCellSignal(fg);
-                      }
+                      if (!setIcon(cell, "stat_sys_signal_0", fg)) showNoCellSignal(fg);
                   }
               } catch (Throwable t) {
-                  // Failure to query telephony must not turn the slot into unexplained blank space.
                   showNoCellSignal(fg);
               }
           }
@@ -227,11 +199,8 @@ jobs:
           }
 
           private void updateBattery() {'''
-          s, n = re.subn(
-              r'\s*private void updateCell\(int fg\) \{.*?\s*private void updateBattery\(\) \{',
-              '\n' + new_cell, s, count=1, flags=re.S)
-          if n != 1:
-              raise SystemExit('updateCell patch failed')
+          s, n = re.subn(r'\s*private void updateCell\(int fg\) \{.*?\s*private void updateBattery\(\) \{', '\n' + new_cell, s, count=1, flags=re.S)
+          if n != 1: raise SystemExit('updateCell patch failed')
 
           p.write_text(s)
 
