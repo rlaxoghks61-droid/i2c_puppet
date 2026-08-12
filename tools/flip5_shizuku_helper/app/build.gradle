@@ -14,22 +14,9 @@ android {
         versionName '1.0'
     }
 
-    signingConfigs {
-        helper {
-            storeFile file('../flip5-helper.keystore')
-            storePassword 'android'
-            keyAlias 'flip5helper'
-            keyPassword 'android'
-        }
-    }
-
     buildTypes {
-        debug {
-            signingConfig signingConfigs.helper
-        }
         release {
             minifyEnabled false
-            signingConfig signingConfigs.helper
         }
     }
 
