@@ -29,10 +29,6 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Restore signing key
-        working-directory: tools/flip5_shizuku_helper
-        run: base64 -d flip5-helper.keystore.b64 > flip5-helper.keystore
-
       - name: Build APK
         working-directory: tools/flip5_shizuku_helper
         run: gradle :app:assembleRelease --stacktrace
@@ -40,5 +36,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Flip5CoverHelper-Shizuku-v1.0
-          path: tools/flip5_shizuku_helper/app/build/outputs/apk/release/app-release.apk
+          name: Flip5CoverHelper-Shizuku-v1.0-unsigned
+          path: tools/flip5_shizuku_helper/app/build/outputs/apk/release/app-release-unsigned.apk
