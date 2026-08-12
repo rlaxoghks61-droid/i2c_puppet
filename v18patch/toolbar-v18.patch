@@ -1,0 +1,52 @@
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -10,8 +10,8 @@
+         applicationId = "com.bbq20kbd.toolbar.test"
+         minSdk = 31
+         targetSdk = 36
+-        versionCode = 19
+-        versionName = "2.6"
++        versionCode = 20
++        versionName = "2.7"
+     }
+ 
+     compileOptions {
+--- a/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java
++++ b/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java
+@@ -392,7 +392,10 @@
+     private void addToolbarClipboardButton(LinearLayout bar, int color, View.OnClickListener listener) {
+         FrameLayout button = toolbarButtonShell("클립보드", listener);
+ 
+-        View sheet = new View(uiContext());
++        // Samsung-style clipboard: the small clip sits fully INSIDE the sheet outline.
++        // Keeping the clip as a child of the sheet prevents it from protruding above
++        // the outer rectangle and looking like a file-folder tab.
++        FrameLayout sheet = new FrameLayout(uiContext());
+         GradientDrawable sheetBg = new GradientDrawable();
+         sheetBg.setColor(Color.TRANSPARENT);
+         sheetBg.setStroke(dp(2), color);
+@@ -400,19 +403,19 @@
+         sheet.setBackground(sheetBg);
+         FrameLayout.LayoutParams sheetLp = new FrameLayout.LayoutParams(dp(13), dp(16));
+         sheetLp.gravity = Gravity.CENTER;
+-        sheetLp.topMargin = dp(3);
++        sheetLp.topMargin = dp(2);
+         button.addView(sheet, sheetLp);
+ 
+         View clip = new View(uiContext());
+         GradientDrawable clipBg = new GradientDrawable();
+         clipBg.setColor(Color.TRANSPARENT);
+         clipBg.setStroke(dp(2), color);
+-        clipBg.setCornerRadii(new float[]{dp(3), dp(3), dp(3), dp(3), dp(2), dp(2), dp(2), dp(2)});
++        clipBg.setCornerRadius(dp(2));
+         clip.setBackground(clipBg);
+-        FrameLayout.LayoutParams clipLp = new FrameLayout.LayoutParams(dp(8), dp(5));
++        FrameLayout.LayoutParams clipLp = new FrameLayout.LayoutParams(dp(7), dp(4));
+         clipLp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+-        clipLp.topMargin = dp(5);
+-        button.addView(clip, clipLp);
++        clipLp.topMargin = dp(2);
++        sheet.addView(clip, clipLp);
+ 
+         bar.addView(button, new LinearLayout.LayoutParams(0, WindowManager.LayoutParams.MATCH_PARENT, 1f));
+     }
