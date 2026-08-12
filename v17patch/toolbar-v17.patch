@@ -1,0 +1,62 @@
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -10,8 +10,8 @@
+         applicationId = "com.bbq20kbd.toolbar.test"
+         minSdk = 31
+         targetSdk = 36
+-        versionCode = 18
+-        versionName = "2.5"
++        versionCode = 19
++        versionName = "2.6"
+     }
+ 
+     compileOptions {
+--- a/app/src/main/java/com/bbq20kbd/toolbar/test/MainActivity.java
++++ b/app/src/main/java/com/bbq20kbd/toolbar/test/MainActivity.java
+@@ -35,8 +35,7 @@
+ 
+         TextView info = new TextView(this);
+         info.setText("외장 하드웨어 키보드가 연결된 커버 화면에서 자동으로 표시됩니다.\n\n" +
+-                "오버레이 권한은 툴바 표시용이고, 접근성 권한은 툴바 입력용입니다. " +
+-                "스크린샷 자동 클립보드는 전원+볼륨↓로 저장되는 새 스크린샷을 감지하기 위해 사진 접근 권한이 필요합니다.");
++                "오버레이 권한은 툴바 표시용이고, 접근성 권한은 툴바 입력용입니다.");
+         info.setTextColor(Color.DKGRAY);
+         info.setTextSize(15f);
+         LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(-1, -2);
+@@ -57,12 +56,6 @@
+         lp2.topMargin = dp(8);
+         root.addView(accessibility, lp2);
+ 
+-        Button screenshots = new Button(this);
+-        screenshots.setText("스크린샷 자동 클립보드 권한");
+-        screenshots.setOnClickListener(v -> requestScreenshotPermission());
+-        LinearLayout.LayoutParams lp3 = new LinearLayout.LayoutParams(-1, -2);
+-        lp3.topMargin = dp(8);
+-        root.addView(screenshots, lp3);
+ 
+         setContentView(root);
+         requestScreenshotPermission();
+--- a/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java
++++ b/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java
+@@ -357,6 +357,10 @@
+                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                 PixelFormat.TRANSLUCENT);
+         lp.gravity = Gravity.BOTTOM;
++        // Keep the toolbar pinned to the physical bottom of the cover display.
++        // Do not let navigation/gesture insets push the overlay upward.
++        lp.setFitInsetsTypes(0);
++        lp.setFitInsetsSides(0);
+         lp.setTitle("HardwareKeyboardToolbar");
+ 
+         try {
+@@ -996,6 +1000,10 @@
+                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                 PixelFormat.TRANSLUCENT);
+         lp.gravity = Gravity.BOTTOM;
++        // Keep the popup anchored directly above the fixed toolbar even while
++        // the system gesture/navigation UI changes visibility.
++        lp.setFitInsetsTypes(0);
++        lp.setFitInsetsSides(0);
+         lp.y = dp(TOOLBAR_HEIGHT_DP);
+         lp.setTitle("HardwareKeyboardToolbarPanel");
+         content.setOnTouchListener((v, event) -> {
