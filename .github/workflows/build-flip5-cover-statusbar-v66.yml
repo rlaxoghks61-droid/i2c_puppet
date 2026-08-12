@@ -1,4 +1,4 @@
-name: Build Flip5 Cover StatusBar v6.7
+name: Build Flip5 Cover StatusBar v6.8
 
 on:
   push:
@@ -23,7 +23,7 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Apply v6.7 UI and signal behavior
+      - name: Apply v6.8 UI and signal behavior
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -94,7 +94,6 @@ jobs:
           }
 
           private ImageView iconView() {'''
-
           s, n = re.subn(
               r'    private void buildViews\(\) \{.*?    private ImageView iconView\(\) \{',
               new_build, s, count=1, flags=re.S)
@@ -102,27 +101,23 @@ jobs:
               raise SystemExit('buildViews patch failed')
 
           new_wifi = r'''    private void updateWifi(int fg) {
-              ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
               WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
-              if (cm == null || wm == null) {
+              if (wm == null || !wm.isWifiEnabled()) {
                   hideButKeepSlot(wifi);
                   return;
               }
               try {
-                  Network active = cm.getActiveNetwork();
-                  NetworkCapabilities caps = active == null ? null : cm.getNetworkCapabilities(active);
-                  if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                      hideButKeepSlot(wifi);
-                      return;
-                  }
                   WifiInfo info = wm.getConnectionInfo();
-                  if (info == null) {
+                  boolean connected = info != null
+                          && info.getNetworkId() != -1
+                          && info.getSupplicantState() == android.net.wifi.SupplicantState.COMPLETED;
+                  if (!connected) {
                       hideButKeepSlot(wifi);
                       return;
                   }
                   int level = WifiManager.calculateSignalLevel(info.getRssi(), 5);
                   if (!setIcon(wifi, "stat_sys_wifi_signal_" + level, fg)) {
-                      setIcon(wifi, "stat_sys_wifi_signal_4", fg);
+                      hideButKeepSlot(wifi);
                   }
               } catch (Throwable t) {
                   hideButKeepSlot(wifi);
@@ -140,31 +135,40 @@ jobs:
               hideButKeepSlot(data);
               TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
               if (tm == null) {
-                  setIcon(cell, "stat_sys_signal_null_4", fg);
+                  hideButKeepSlot(cell);
                   return;
               }
               try {
                   if (Build.VERSION.SDK_INT >= 23
                           && checkSelfPermission(Manifest.permission.READ_PHONE_STATE)
                           != PackageManager.PERMISSION_GRANTED) {
-                      setIcon(cell, "stat_sys_signal_null_4", fg);
+                      hideButKeepSlot(cell);
                       return;
                   }
+
                   ServiceState state = tm.getServiceState();
-                  if (state == null || state.getState() != ServiceState.STATE_IN_SERVICE) {
-                      setIcon(cell, "stat_sys_signal_null_4", fg);
+                  if (state == null) {
+                      hideButKeepSlot(cell);
                       return;
                   }
+
+                  if (state.getState() != ServiceState.STATE_IN_SERVICE) {
+                      if (!setIcon(cell, "stat_sys_signal_null_4", fg)) {
+                          setIcon(cell, "stat_sys_signal_0", fg);
+                      }
+                      return;
+                  }
+
                   int level = 0;
                   if (Build.VERSION.SDK_INT >= 28) {
                       SignalStrength ss = tm.getSignalStrength();
                       if (ss != null) level = ss.getLevel();
                   }
                   if (!setIcon(cell, "stat_sys_signal_" + level, fg)) {
-                      setIcon(cell, "stat_sys_signal_null_4", fg);
+                      setIcon(cell, "stat_sys_signal_0", fg);
                   }
               } catch (Throwable t) {
-                  setIcon(cell, "stat_sys_signal_null_4", fg);
+                  hideButKeepSlot(cell);
               }
           }
 
@@ -179,8 +183,8 @@ jobs:
 
           g = Path('tools/flip5_cover_statusbar_v62/app/build.gradle')
           t = g.read_text()
-          t = re.sub(r'versionCode\s+\d+', 'versionCode 67', t)
-          t = re.sub(r"versionName\s+'[^']+'", "versionName '6.7'", t)
+          t = re.sub(r'versionCode\s+\d+', 'versionCode 68', t)
+          t = re.sub(r"versionName\s+'[^']+'", "versionName '6.8'", t)
           g.write_text(t)
           PY
 
@@ -191,5 +195,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Flip5CoverStatusBar-v6.7-NoServiceIcon
+          name: Flip5CoverStatusBar-v6.8-TrueNoSignal
           path: tools/flip5_cover_statusbar_v62/app/build/outputs/apk/release/*.apk
