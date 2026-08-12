@@ -25,12 +25,7 @@ jobs:
           gradle-version: '8.11.1'
       - name: Restore merged source
         run: |
-          # These upload chunks overlap by 21,000 chars:
-          # part00 = source[0:30000], part01 = source[9000:39000],
-          # part02 = source[18000:end]. Rebuild the original 44,988-char base64 exactly.
-          cat mergedcovertoolbar/part00.txt > /tmp/merged-source.b64
-          tail -c +21001 mergedcovertoolbar/part01.txt >> /tmp/merged-source.b64
-          tail -c +21001 mergedcovertoolbar/part02.txt >> /tmp/merged-source.b64
+          cat mergedcovertoolbar/part00.txt mergedcovertoolbar/part01.txt mergedcovertoolbar/part02.txt mergedcovertoolbar/part03.txt mergedcovertoolbar/part04.txt > /tmp/merged-source.b64
           test "$(wc -c < /tmp/merged-source.b64)" = "44988"
           echo '8cac4a2fa515706964ad95c83bdbeec3fa4944b5a6042167890bea96d02eb4aa  /tmp/merged-source.b64' | sha256sum -c -
           base64 -d /tmp/merged-source.b64 > /tmp/merged-source.tar.xz
