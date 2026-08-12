@@ -1,4 +1,4 @@
-name: Build Flip5 Cover StatusBar v6.4
+name: Build Flip5 Cover StatusBar v6.5
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Apply v6.4 layout and always-visible WiFi LTE
+      - name: Apply v6.5 layout and always-visible WiFi LTE
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -188,8 +188,8 @@ jobs:
 
           g = Path('tools/flip5_cover_statusbar_v62/app/build.gradle')
           t = g.read_text()
-          t = re.sub(r'versionCode\s+\d+', 'versionCode 64', t)
-          t = re.sub(r"versionName\s+'[^']+'", "versionName '6.4'", t)
+          t = re.sub(r'versionCode\s+\d+', 'versionCode 65', t)
+          t = re.sub(r"versionName\s+'[^']+'", "versionName '6.5'", t)
           g.write_text(t)
           PY
 
@@ -200,5 +200,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Flip5CoverStatusBar-v6.4-v413Layout-LeftNudge-WiderSpacing
+          name: Flip5CoverStatusBar-v6.5-v413Layout-InAppPermissions
           path: tools/flip5_cover_statusbar_v62/app/build/outputs/apk/release/*.apk
