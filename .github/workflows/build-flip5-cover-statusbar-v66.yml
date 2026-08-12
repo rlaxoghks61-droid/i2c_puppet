@@ -1,0 +1,195 @@
+name: Build Flip5 Cover StatusBar v6.6
+
+on:
+  push:
+    branches: [flip5-shizuku-helper-build]
+    paths:
+      - '.github/workflows/build-flip5-cover-statusbar-v66.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Apply v6.6 UI and signal behavior
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('tools/flip5_cover_statusbar_v62/app/src/main/java/com/flip5/coverstatusbar/OverlayService.java')
+          s = p.read_text()
+
+          new_build = r'''    private void buildViews() {
+              root = new FrameLayout(coverWindowContext);
+              root.setClipChildren(false);
+              root.setClipToPadding(false);
+
+              LinearLayout cluster = new LinearLayout(coverWindowContext);
+              cluster.setOrientation(LinearLayout.HORIZONTAL);
+              cluster.setGravity(Gravity.CENTER_VERTICAL);
+              cluster.setClipChildren(false);
+              cluster.setClipToPadding(false);
+
+              FrameLayout.LayoutParams clusterLp = new FrameLayout.LayoutParams(
+                      FrameLayout.LayoutParams.WRAP_CONTENT,
+                      BAR_HEIGHT_PX,
+                      Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+              clusterLp.rightMargin = 18;
+              root.addView(cluster, clusterLp);
+
+              clock = new TextClock(coverWindowContext);
+              clock.setFormat24Hour("HH:mm");
+              clock.setTextSize(14f);
+              clock.setGravity(Gravity.CENTER_VERTICAL | Gravity.CENTER_HORIZONTAL);
+              LinearLayout.LayoutParams clockLp = new LinearLayout.LayoutParams(
+                      LinearLayout.LayoutParams.WRAP_CONTENT, BAR_HEIGHT_PX);
+              clockLp.rightMargin = 7;
+              cluster.addView(clock, clockLp);
+              clock.setTranslationX(4f);
+
+              ringer = iconView();
+              cluster.addView(ringer, iconSlot(28, 28, 6));
+              ringer.setTranslationX(4f);
+
+              wifi = iconView();
+              cluster.addView(wifi, iconSlot(34, 34, 7));
+              wifi.setTranslationX(4f);
+
+              cell = iconView();
+              cluster.addView(cell, iconSlot(31, 31, 6));
+              cell.setTranslationX(4f);
+
+              data = iconView();
+              cluster.addView(data, iconSlot(0, 0, 0));
+              data.setVisibility(View.INVISIBLE);
+
+              battery = new TextView(coverWindowContext);
+              battery.setTextSize(14f);
+              battery.setSingleLine(true);
+              battery.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+              LinearLayout.LayoutParams batteryLp = new LinearLayout.LayoutParams(
+                      LinearLayout.LayoutParams.WRAP_CONTENT, BAR_HEIGHT_PX);
+              batteryLp.rightMargin = 10;
+              cluster.addView(battery, batteryLp);
+          }
+
+          private LinearLayout.LayoutParams iconSlot(int widthPx, int heightPx, int rightMarginPx) {
+              LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(widthPx, heightPx);
+              p.gravity = Gravity.CENTER_VERTICAL;
+              p.rightMargin = rightMarginPx;
+              return p;
+          }
+
+          private ImageView iconView() {'''
+
+          s, n = re.subn(
+              r'    private void buildViews\(\) \{.*?    private ImageView iconView\(\) \{',
+              new_build, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('buildViews patch failed')
+
+          new_wifi = r'''    private void updateWifi(int fg) {
+              ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+              WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+              if (cm == null || wm == null) {
+                  hideButKeepSlot(wifi);
+                  return;
+              }
+              try {
+                  Network active = cm.getActiveNetwork();
+                  NetworkCapabilities caps = active == null ? null : cm.getNetworkCapabilities(active);
+                  if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                      hideButKeepSlot(wifi);
+                      return;
+                  }
+                  WifiInfo info = wm.getConnectionInfo();
+                  if (info == null) {
+                      hideButKeepSlot(wifi);
+                      return;
+                  }
+                  int level = WifiManager.calculateSignalLevel(info.getRssi(), 5);
+                  if (!setIcon(wifi, "stat_sys_wifi_signal_" + level, fg)) {
+                      setIcon(wifi, "stat_sys_wifi_signal_4", fg);
+                  }
+              } catch (Throwable t) {
+                  hideButKeepSlot(wifi);
+              }
+          }
+
+          private void updateCell(int fg) {'''
+          s, n = re.subn(
+              r'    private void updateWifi\(int fg\) \{.*?    private void updateCell\(int fg\) \{',
+              new_wifi, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('updateWifi patch failed')
+
+          new_cell = r'''    private void updateCell(int fg) {
+              hideButKeepSlot(data);
+              TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
+              if (tm == null) {
+                  hideButKeepSlot(cell);
+                  return;
+              }
+              try {
+                  if (Build.VERSION.SDK_INT >= 23
+                          && checkSelfPermission(Manifest.permission.READ_PHONE_STATE)
+                          != PackageManager.PERMISSION_GRANTED) {
+                      hideButKeepSlot(cell);
+                      return;
+                  }
+                  ServiceState state = tm.getServiceState();
+                  if (state == null || state.getState() != ServiceState.STATE_IN_SERVICE) {
+                      hideButKeepSlot(cell);
+                      return;
+                  }
+                  int level = 0;
+                  if (Build.VERSION.SDK_INT >= 28) {
+                      SignalStrength ss = tm.getSignalStrength();
+                      if (ss != null) level = ss.getLevel();
+                  }
+                  if (!setIcon(cell, "stat_sys_signal_" + level, fg)) {
+                      setIcon(cell, "stat_sys_signal_null_4", fg);
+                  }
+              } catch (Throwable t) {
+                  hideButKeepSlot(cell);
+              }
+          }
+
+          private void updateBattery() {'''
+          s, n = re.subn(
+              r'\s*private void updateCell\(int fg\) \{.*?\s*private void updateBattery\(\) \{',
+              '\n' + new_cell, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('updateCell patch failed')
+
+          p.write_text(s)
+
+          g = Path('tools/flip5_cover_statusbar_v62/app/build.gradle')
+          t = g.read_text()
+          t = re.sub(r'versionCode\s+\d+', 'versionCode 66', t)
+          t = re.sub(r"versionName\s+'[^']+'", "versionName '6.6'", t)
+          g.write_text(t)
+          PY
+
+      - name: Build APK
+        working-directory: tools/flip5_cover_statusbar_v62
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Flip5CoverStatusBar-v6.6-RealSignals-RightNudge
+          path: tools/flip5_cover_statusbar_v62/app/build/outputs/apk/release/*.apk
