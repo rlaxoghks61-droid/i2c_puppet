@@ -1,4 +1,4 @@
-name: Build Flip5 Cover StatusBar v6.8
+name: Build Flip5 Cover StatusBar v6.9
 
 on:
   push:
@@ -23,7 +23,7 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Apply v6.8 UI and signal behavior
+      - name: Apply v6.9 robust signal behavior
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -72,6 +72,7 @@ jobs:
               cluster.addView(cell, iconSlot(31, 31, 6));
               cell.setTranslationX(4f);
 
+              // Keep the old LTE/5G text slot removed completely.
               data = iconView();
               cluster.addView(data, iconSlot(0, 0, 0));
               data.setVisibility(View.INVISIBLE);
@@ -102,25 +103,52 @@ jobs:
 
           new_wifi = r'''    private void updateWifi(int fg) {
               WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
-              if (wm == null || !wm.isWifiEnabled()) {
+              ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+              if (wm == null || cm == null || !wm.isWifiEnabled()) {
                   hideButKeepSlot(wifi);
                   return;
               }
+
               try {
-                  WifiInfo info = wm.getConnectionInfo();
-                  boolean connected = info != null
-                          && info.getNetworkId() != -1
-                          && info.getSupplicantState() == android.net.wifi.SupplicantState.COMPLETED;
-                  if (!connected) {
+                  // Do not use WifiInfo networkId/supplicant state here. On recent Android
+                  // those fields can be privacy-redacted even while Wi-Fi is connected.
+                  boolean wifiConnected = false;
+                  Network[] networks = cm.getAllNetworks();
+                  if (networks != null) {
+                      for (Network network : networks) {
+                          NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+                          if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                              wifiConnected = true;
+                              break;
+                          }
+                      }
+                  }
+                  if (!wifiConnected) {
                       hideButKeepSlot(wifi);
                       return;
                   }
-                  int level = WifiManager.calculateSignalLevel(info.getRssi(), 5);
+
+                  WifiInfo info = wm.getConnectionInfo();
+                  int level = 4;
+                  if (info != null) {
+                      int rssi = info.getRssi();
+                      if (rssi != WifiInfo.INVALID_RSSI) {
+                          level = WifiManager.calculateSignalLevel(rssi, 5);
+                      }
+                  }
+                  if (level < 0) level = 0;
+                  if (level > 4) level = 4;
+
+                  // Generic Samsung Wi-Fi resources have no Wi-Fi-generation text.
                   if (!setIcon(wifi, "stat_sys_wifi_signal_" + level, fg)) {
-                      hideButKeepSlot(wifi);
+                      // Never blank a connected Wi-Fi icon because one level drawable failed.
+                      setIcon(wifi, "stat_sys_wifi_signal_4", fg);
                   }
               } catch (Throwable t) {
-                  hideButKeepSlot(wifi);
+                  // If Wi-Fi is on but status probing is restricted, preserve a visible glyph.
+                  if (!setIcon(wifi, "stat_sys_wifi_signal_4", fg)) {
+                      hideButKeepSlot(wifi);
+                  }
               }
           }
 
@@ -133,42 +161,68 @@ jobs:
 
           new_cell = r'''    private void updateCell(int fg) {
               hideButKeepSlot(data);
+
               TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
               if (tm == null) {
-                  hideButKeepSlot(cell);
+                  showNoCellSignal(fg);
                   return;
               }
+
               try {
+                  // Use the active/default data subscription when possible. The process-wide
+                  // TelephonyManager can point at an inactive subscription on dual-SIM phones.
+                  int subId = android.telephony.SubscriptionManager.getDefaultDataSubscriptionId();
+                  if (android.telephony.SubscriptionManager.isValidSubscriptionId(subId)) {
+                      tm = tm.createForSubscriptionId(subId);
+                  }
+
                   if (Build.VERSION.SDK_INT >= 23
                           && checkSelfPermission(Manifest.permission.READ_PHONE_STATE)
                           != PackageManager.PERMISSION_GRANTED) {
-                      hideButKeepSlot(cell);
+                      showNoCellSignal(fg);
                       return;
                   }
 
                   ServiceState state = tm.getServiceState();
-                  if (state == null) {
-                      hideButKeepSlot(cell);
+                  if (state != null && state.getState() != ServiceState.STATE_IN_SERVICE) {
+                      showNoCellSignal(fg);
                       return;
                   }
 
-                  if (state.getState() != ServiceState.STATE_IN_SERVICE) {
-                      if (!setIcon(cell, "stat_sys_signal_null_4", fg)) {
-                          setIcon(cell, "stat_sys_signal_0", fg);
+                  SignalStrength ss = null;
+                  if (Build.VERSION.SDK_INT >= 28) {
+                      ss = tm.getSignalStrength();
+                  }
+
+                  // A null ServiceState alone is not enough to erase the icon. If signal
+                  // strength exists, use it. Otherwise keep a zero-bar antenna visible.
+                  int level = 0;
+                  if (ss != null) {
+                      level = ss.getLevel();
+                  } else if (state == null) {
+                      if (!setIcon(cell, "stat_sys_signal_0", fg)) {
+                          showNoCellSignal(fg);
                       }
                       return;
                   }
 
-                  int level = 0;
-                  if (Build.VERSION.SDK_INT >= 28) {
-                      SignalStrength ss = tm.getSignalStrength();
-                      if (ss != null) level = ss.getLevel();
-                  }
+                  if (level < 0) level = 0;
+                  if (level > 4) level = 4;
                   if (!setIcon(cell, "stat_sys_signal_" + level, fg)) {
-                      setIcon(cell, "stat_sys_signal_0", fg);
+                      // Keep the cellular slot visible even if a particular level resource fails.
+                      if (!setIcon(cell, "stat_sys_signal_0", fg)) {
+                          showNoCellSignal(fg);
+                      }
                   }
               } catch (Throwable t) {
-                  hideButKeepSlot(cell);
+                  // Failure to query telephony must not turn the slot into unexplained blank space.
+                  showNoCellSignal(fg);
+              }
+          }
+
+          private void showNoCellSignal(int fg) {
+              if (!setIcon(cell, "stat_sys_signal_null_4", fg)) {
+                  setIcon(cell, "stat_sys_signal_0", fg);
               }
           }
 
@@ -183,8 +237,8 @@ jobs:
 
           g = Path('tools/flip5_cover_statusbar_v62/app/build.gradle')
           t = g.read_text()
-          t = re.sub(r'versionCode\s+\d+', 'versionCode 68', t)
-          t = re.sub(r"versionName\s+'[^']+'", "versionName '6.8'", t)
+          t = re.sub(r'versionCode\s+\d+', 'versionCode 69', t)
+          t = re.sub(r"versionName\s+'[^']+'", "versionName '6.9'", t)
           g.write_text(t)
           PY
 
@@ -195,5 +249,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Flip5CoverStatusBar-v6.8-TrueNoSignal
+          name: Flip5CoverStatusBar-v6.9-RobustRealSignals
           path: tools/flip5_cover_statusbar_v62/app/build/outputs/apk/release/*.apk
