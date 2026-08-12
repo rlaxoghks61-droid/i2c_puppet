@@ -1,0 +1,40 @@
+name: Build merged CoverRecents + Hardware Toolbar
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "hw-keyboard-toolbar-final" ]
+    paths:
+      - ".github/workflows/build-merged-cover-toolbar.yml"
+      - "mergedcovertoolbar/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android 36 SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Restore merged source
+        run: |
+          cat mergedcovertoolbar/part*.txt | base64 -d > /tmp/merged-source.tar.xz
+          xz -t /tmp/merged-source.tar.xz
+          tar -xJf /tmp/merged-source.tar.xz
+          test -f merged_project/app/build.gradle.kts
+          test -f merged_project/app/src/main/java/apps/ijp/coverrecents/service/RecentsEngine.java
+          test -f merged_project/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java
+      - name: Build merged APK
+        working-directory: merged_project
+        run: gradle :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CoverRecents-HardwareToolbar-Merged
+          path: merged_project/app/build/outputs/apk/debug/app-debug.apk
