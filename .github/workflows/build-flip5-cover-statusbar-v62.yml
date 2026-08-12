@@ -1,4 +1,4 @@
-name: Build Flip5 Cover StatusBar v6.3
+name: Build Flip5 Cover StatusBar v6.4
 
 on:
   push:
@@ -29,11 +29,176 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Apply v6.3 position tuning
+      - name: Apply v6.4 layout and always-visible WiFi LTE
         run: |
-          sed -i 's/RIGHT_SAFE_MARGIN_PX = 32/RIGHT_SAFE_MARGIN_PX = 6/' tools/flip5_cover_statusbar_v62/app/src/main/java/com/flip5/coverstatusbar/OverlayService.java
-          sed -i 's/versionCode 62/versionCode 63/' tools/flip5_cover_statusbar_v62/app/build.gradle
-          sed -i "s/versionName '6.2'/versionName '6.3'/" tools/flip5_cover_statusbar_v62/app/build.gradle
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('tools/flip5_cover_statusbar_v62/app/src/main/java/com/flip5/coverstatusbar/OverlayService.java')
+          s = p.read_text()
+
+          new_build = r'''    private void buildViews() {
+              root = new FrameLayout(coverWindowContext);
+              root.setClipChildren(false);
+              root.setClipToPadding(false);
+
+              LinearLayout cluster = new LinearLayout(coverWindowContext);
+              cluster.setOrientation(LinearLayout.HORIZONTAL);
+              cluster.setGravity(Gravity.CENTER_VERTICAL);
+              cluster.setClipChildren(false);
+              cluster.setClipToPadding(false);
+
+              FrameLayout.LayoutParams clusterLp = new FrameLayout.LayoutParams(
+                      FrameLayout.LayoutParams.WRAP_CONTENT,
+                      BAR_HEIGHT_PX,
+                      Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+              // v4.13-era visual position, nudged slightly left for the curved right edge.
+              clusterLp.rightMargin = 18;
+              root.addView(cluster, clusterLp);
+
+              clock = new TextClock(coverWindowContext);
+              clock.setFormat24Hour("HH:mm");
+              clock.setTextSize(14f);
+              clock.setGravity(Gravity.CENTER_VERTICAL | Gravity.CENTER_HORIZONTAL);
+              LinearLayout.LayoutParams clockLp = new LinearLayout.LayoutParams(
+                      LinearLayout.LayoutParams.WRAP_CONTENT, BAR_HEIGHT_PX);
+              clockLp.rightMargin = 7;
+              cluster.addView(clock, clockLp);
+
+              ringer = iconView();
+              cluster.addView(ringer, iconSlot(28, 28, 6));
+
+              wifi = iconView();
+              cluster.addView(wifi, iconSlot(34, 34, 7));
+
+              cell = iconView();
+              cluster.addView(cell, iconSlot(31, 31, 6));
+
+              data = iconView();
+              cluster.addView(data, iconSlot(32, 23, 8));
+
+              battery = new TextView(coverWindowContext);
+              battery.setTextSize(14f);
+              battery.setSingleLine(true);
+              battery.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+              LinearLayout.LayoutParams batteryLp = new LinearLayout.LayoutParams(
+                      LinearLayout.LayoutParams.WRAP_CONTENT, BAR_HEIGHT_PX);
+              // Battery gets a little extra right gap so the text itself sits farther left.
+              batteryLp.rightMargin = 10;
+              cluster.addView(battery, batteryLp);
+          }
+
+          private LinearLayout.LayoutParams iconSlot(int widthPx, int heightPx, int rightMarginPx) {
+              LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(widthPx, heightPx);
+              p.gravity = Gravity.CENTER_VERTICAL;
+              p.rightMargin = rightMarginPx;
+              return p;
+          }
+
+          private ImageView iconView() {'''
+
+          s, n = re.subn(
+              r'    private void buildViews\(\) \{.*?    private ImageView iconView\(\) \{',
+              new_build,
+              s,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit('buildViews patch failed')
+
+          new_wifi = r'''    private void updateWifi(int fg) {
+              int level = 4;
+              String prefix = "stat_sys_wifi_signal_";
+              try {
+                  WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+                  if (wm != null) {
+                      WifiInfo info = wm.getConnectionInfo();
+                      if (info != null) {
+                          level = WifiManager.calculateSignalLevel(info.getRssi(), 5);
+                          if (Build.VERSION.SDK_INT >= 30) {
+                              int standard = info.getWifiStandard();
+                              if (standard == 5) {
+                                  prefix = "stat_sys_wifi5_signal_";
+                              } else if (standard == 6) {
+                                  if (info.getFrequency() >= 5925) {
+                                      prefix = "stat_sys_6ewifi_signal_";
+                                  } else {
+                                      prefix = "stat_sys_wifi6_signal_";
+                                  }
+                              } else if (standard >= 8) {
+                                  prefix = "stat_sys_wifi7_signal_";
+                              }
+                          }
+                      }
+                  }
+              } catch (Throwable ignored) {
+              }
+
+              // Always keep a Wi-Fi glyph visible. Prefer the live Samsung variant,
+              // then fall back to the standard full-strength Samsung glyph.
+              if (!setIcon(wifi, prefix + level, fg)) {
+                  if (!setIcon(wifi, "stat_sys_wifi_signal_" + level, fg)) {
+                      setIcon(wifi, "stat_sys_wifi_signal_4", fg);
+                  }
+              }
+          }
+
+          private void updateCell(int fg) {'''
+          s, n = re.subn(
+              r'    private void updateWifi\(int fg\) \{.*?    private void updateCell\(int fg\) \{',
+              new_wifi,
+              s,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit('updateWifi patch failed')
+
+          new_cell = r'''    private void updateCell(int fg) {
+              int level = 4;
+              try {
+                  TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
+                  if (tm != null && (Build.VERSION.SDK_INT < 23
+                          || checkSelfPermission(Manifest.permission.READ_PHONE_STATE)
+                          == PackageManager.PERMISSION_GRANTED)) {
+                      if (Build.VERSION.SDK_INT >= 28) {
+                          SignalStrength ss = tm.getSignalStrength();
+                          if (ss != null) level = ss.getLevel();
+                      }
+                  }
+              } catch (Throwable ignored) {
+              }
+
+              // Keep cellular bars and LTE badge visible at all times, per user preference.
+              if (!setIcon(cell, "stat_sys_signal_" + level, fg)) {
+                  if (!setIcon(cell, "stat_sys_signal_4", fg)) {
+                      setIcon(cell, "stat_sys_signal_null_4", fg);
+                  }
+              }
+              setIcon(data, "stat_sys_data_connected_lte", fg);
+          }
+
+          private void updateBattery() {'''
+          s, n = re.subn(
+              r'    private void updateCell\(int fg\) \{.*?    private void updateBattery\(\) \{',
+              new_cell,
+              s,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit('updateCell patch failed')
+
+          p.write_text(s)
+
+          g = Path('tools/flip5_cover_statusbar_v62/app/build.gradle')
+          t = g.read_text()
+          t = re.sub(r'versionCode\s+\d+', 'versionCode 64', t)
+          t = re.sub(r"versionName\s+'[^']+'", "versionName '6.4'", t)
+          g.write_text(t)
+          PY
 
       - name: Build APK
         working-directory: tools/flip5_cover_statusbar_v62
@@ -42,5 +207,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Flip5CoverStatusBar-v6.3-RightEdge-FixedPosition-Sticky
+          name: Flip5CoverStatusBar-v6.4-v413Layout-LeftNudge-WiderSpacing
           path: tools/flip5_cover_statusbar_v62/app/build/outputs/apk/release/*.apk
