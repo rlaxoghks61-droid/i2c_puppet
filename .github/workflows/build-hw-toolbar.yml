@@ -6,7 +6,7 @@ on:
     branches: [ "hw-keyboard-toolbar-final" ]
     paths:
       - ".github/workflows/build-hw-toolbar.yml"
-      - "toolbar-v8-overrides.tar.gz.b64"
+      - "toolbar-v9-overrides.tar.gz.b64"
 
 jobs:
   build:
@@ -29,14 +29,14 @@ jobs:
         run: git show dcdb6004fee243751ae70d5e172583533dea8b35:android-toolbar.zip > android-toolbar.zip
       - name: Unpack project
         run: mkdir -p android-toolbar && unzip -q android-toolbar.zip -d android-toolbar
-      - name: Apply v8 toolbar overrides
+      - name: Apply v9 toolbar overrides
         run: |
-          base64 -d toolbar-v8-overrides.tar.gz.b64 > toolbar-v8-overrides.tar.gz
-          tar -xzf toolbar-v8-overrides.tar.gz -C android-toolbar
+          base64 -d toolbar-v9-overrides.tar.gz.b64 > toolbar-v9-overrides.tar.gz
+          tar -xzf toolbar-v9-overrides.tar.gz -C android-toolbar
       - name: Build
         working-directory: android-toolbar
         run: gradle :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: HardwareKeyboardToolbar-v8
+          name: HardwareKeyboardToolbar-v9
           path: android-toolbar/app/build/outputs/apk/debug/app-debug.apk
