@@ -34,10 +34,163 @@ jobs:
           cat v11b/part*.txt > toolbar-v11-overrides.tar.gz.b64
           base64 -d toolbar-v11-overrides.tar.gz.b64 > toolbar-v11-overrides.tar.gz
           tar -xzf toolbar-v11-overrides.tar.gz -C android-toolbar
+      - name: Patch Samsung Notes input fallback
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('android-toolbar/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java')
+          s = p.read_text()
+
+          if 'import android.util.Log;' not in s:
+              s = s.replace('import android.text.TextUtils;\n', 'import android.text.TextUtils;\nimport android.util.Log;\n')
+          s = s.replace('public class KeyboardAccessibilityService extends AccessibilityService {\n',
+                        'public class KeyboardAccessibilityService extends AccessibilityService {\n    private static final String TAG = "HWKeyboardInput";\n')
+
+          start = s.index('    private AccessibilityNodeInfo focusedEditableNode() {')
+          end = s.index('    private String nodeKey(AccessibilityNodeInfo node) {')
+          replacement = '''    private AccessibilityNodeInfo focusedEditableNode() {
+              AccessibilityNodeInfo root = getRootInActiveWindow();
+              if (root == null) return null;
+
+              AccessibilityNodeInfo node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+              if (isUsableInputNode(node)) return node;
+
+              AccessibilityNodeInfo focused = findFocusedInput(root);
+              if (focused != null) return focused;
+
+              AccessibilityNodeInfo actionable = findActionableInput(root);
+              if (actionable != null) return actionable;
+              return node;
+          }
+
+          private boolean isUsableInputNode(AccessibilityNodeInfo node) {
+              if (node == null) return false;
+              return node.isEditable() || supportsAction(node, AccessibilityNodeInfo.ACTION_SET_TEXT)
+                      || supportsAction(node, AccessibilityNodeInfo.ACTION_PASTE);
+          }
+
+          private boolean supportsAction(AccessibilityNodeInfo node, int actionId) {
+              if (node == null) return false;
+              for (AccessibilityNodeInfo.AccessibilityAction action : node.getActionList()) {
+                  if (action != null && action.getId() == actionId) return true;
+              }
+              return (node.getActions() & actionId) != 0;
+          }
+
+          private AccessibilityNodeInfo findFocusedInput(AccessibilityNodeInfo node) {
+              if (node == null) return null;
+              if ((node.isFocused() || node.isAccessibilityFocused()) && isUsableInputNode(node)) return node;
+              for (int i = 0; i < node.getChildCount(); i++) {
+                  AccessibilityNodeInfo found = findFocusedInput(node.getChild(i));
+                  if (found != null) return found;
+              }
+              return null;
+          }
+
+          private AccessibilityNodeInfo findActionableInput(AccessibilityNodeInfo node) {
+              if (node == null) return null;
+              if (isUsableInputNode(node) && (node.isFocused() || node.isAccessibilityFocused())) return node;
+              for (int i = 0; i < node.getChildCount(); i++) {
+                  AccessibilityNodeInfo found = findActionableInput(node.getChild(i));
+                  if (found != null) return found;
+              }
+              if (supportsAction(node, AccessibilityNodeInfo.ACTION_PASTE) ||
+                      supportsAction(node, AccessibilityNodeInfo.ACTION_SET_TEXT)) return node;
+              return null;
+          }
+
+          private boolean pasteToBestNode(String insertion, AccessibilityNodeInfo preferred) {
+              ClipboardManager cb = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+              if (cb != null) cb.setPrimaryClip(ClipData.newPlainText("text", insertion));
+
+              if (tryPasteNode(preferred)) return true;
+
+              AccessibilityNodeInfo parent = preferred == null ? null : preferred.getParent();
+              int depth = 0;
+              while (parent != null && depth++ < 6) {
+                  if (tryPasteNode(parent)) return true;
+                  parent = parent.getParent();
+              }
+
+              AccessibilityNodeInfo root = getRootInActiveWindow();
+              AccessibilityNodeInfo candidate = findFocusedInput(root);
+              if (candidate != null && candidate != preferred && tryPasteNode(candidate)) return true;
+
+              candidate = findActionableInput(root);
+              return candidate != null && candidate != preferred && tryPasteNode(candidate);
+          }
+
+          private boolean tryPasteNode(AccessibilityNodeInfo node) {
+              if (node == null) return false;
+              try {
+                  if (!node.isFocused()) node.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                  boolean ok = node.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+                  if (ok) {
+                      Log.i(TAG, "ACTION_PASTE success pkg=" + node.getPackageName() +
+                              " class=" + node.getClassName() + " editable=" + node.isEditable());
+                      return true;
+                  }
+              } catch (Exception e) {
+                  Log.w(TAG, "ACTION_PASTE failed", e);
+              }
+              return false;
+          }
+
+          '''
+          s = s[:start] + replacement + s[end:]
+
+          old = '''        ClipboardManager cb = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                  if (cb != null) cb.setPrimaryClip(ClipData.newPlainText("text", insertion));
+                  return node.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+          '''
+          if old not in s:
+              raise SystemExit('insertText paste fallback block not found')
+          s = s.replace(old, '        return pasteToBestNode(insertion, node);\n', 1)
+
+          old_paste = '''    public boolean pasteClipboard() {
+              AccessibilityNodeInfo node = focusedEditableNode();
+              if (node == null) return false;
+              syncBeforeToolbarEdit(node);
+              lastTextChangeMs = 0;
+              return node.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+          }
+          '''
+          new_paste = '''    public boolean pasteClipboard() {
+              AccessibilityNodeInfo node = focusedEditableNode();
+              if (node == null) return false;
+              syncBeforeToolbarEdit(node);
+              lastTextChangeMs = 0;
+              try {
+                  if (tryPasteNode(node)) return true;
+                  AccessibilityNodeInfo parent = node.getParent();
+                  int depth = 0;
+                  while (parent != null && depth++ < 6) {
+                      if (tryPasteNode(parent)) return true;
+                      parent = parent.getParent();
+                  }
+                  AccessibilityNodeInfo root = getRootInActiveWindow();
+                  AccessibilityNodeInfo candidate = findFocusedInput(root);
+                  return candidate != null && candidate != node && tryPasteNode(candidate);
+              } catch (Exception e) {
+                  Log.w(TAG, "pasteClipboard failed", e);
+                  return false;
+              }
+          }
+          '''
+          if old_paste not in s:
+              raise SystemExit('pasteClipboard block not found')
+          s = s.replace(old_paste, new_paste, 1)
+          p.write_text(s)
+
+          b = Path('android-toolbar/app/build.gradle.kts')
+          t = b.read_text().replace('versionCode = 12', 'versionCode = 13').replace('versionName = "1.8"', 'versionName = "1.9"')
+          b.write_text(t)
+          PY
       - name: Build
         working-directory: android-toolbar
         run: gradle :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: HardwareKeyboardToolbar-v11-SamsungTranslate
+          name: HardwareKeyboardToolbar-v12-SamsungNotesFix
           path: android-toolbar/app/build/outputs/apk/debug/app-debug.apk
