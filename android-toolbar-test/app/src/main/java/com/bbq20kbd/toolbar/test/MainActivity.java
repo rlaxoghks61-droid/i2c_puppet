@@ -9,11 +9,13 @@ import android.provider.Settings;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private TextView status;
+    private TextView diagnostics;
     private boolean openedOverlaySettings;
 
     @Override
@@ -23,12 +25,12 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
-        int p = dp(24);
+        int p = dp(20);
         root.setPadding(p, p, p, p);
         root.setBackgroundColor(Color.rgb(250, 250, 250));
 
         TextView title = new TextView(this);
-        title.setText("HW Keyboard Toolbar Test");
+        title.setText("HW Keyboard Toolbar Test v2");
         title.setTextSize(22f);
         title.setTextColor(Color.BLACK);
         root.addView(title, new LinearLayout.LayoutParams(-1, -2));
@@ -37,58 +39,102 @@ public class MainActivity extends Activity {
         status.setTextSize(16f);
         status.setTextColor(Color.DKGRAY);
         LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(-1, -2);
-        statusLp.topMargin = dp(18);
+        statusLp.topMargin = dp(14);
         root.addView(status, statusLp);
 
         Button permission = new Button(this);
         permission.setText("오버레이 권한 열기");
         permission.setOnClickListener(v -> openOverlayPermission());
-        LinearLayout.LayoutParams buttonLp = new LinearLayout.LayoutParams(-1, -2);
-        buttonLp.topMargin = dp(18);
-        root.addView(permission, buttonLp);
+        LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(-1, -2);
+        lp1.topMargin = dp(12);
+        root.addView(permission, lp1);
+
+        Button force = new Button(this);
+        force.setText("1. 키보드 무시하고 툴바 강제 표시");
+        force.setOnClickListener(v -> {
+            Intent i = new Intent(this, ToolbarService.class);
+            i.setAction(ToolbarService.ACTION_FORCE_SHOW);
+            startService(i);
+            Toast.makeText(this, "강제 표시 요청", Toast.LENGTH_SHORT).show();
+            refreshDiagnosticsDelayed();
+        });
+        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(-1, -2);
+        lp2.topMargin = dp(8);
+        root.addView(force, lp2);
+
+        Button auto = new Button(this);
+        auto.setText("2. 하드웨어 키보드 자동 감지 모드");
+        auto.setOnClickListener(v -> {
+            Intent i = new Intent(this, ToolbarService.class);
+            i.setAction(ToolbarService.ACTION_AUTO);
+            startService(i);
+            refreshDiagnosticsDelayed();
+        });
+        LinearLayout.LayoutParams lp3 = new LinearLayout.LayoutParams(-1, -2);
+        lp3.topMargin = dp(8);
+        root.addView(auto, lp3);
+
+        Button refresh = new Button(this);
+        refresh.setText("3. 진단 정보 새로고침");
+        refresh.setOnClickListener(v -> refreshDiagnostics());
+        LinearLayout.LayoutParams lp4 = new LinearLayout.LayoutParams(-1, -2);
+        lp4.topMargin = dp(8);
+        root.addView(refresh, lp4);
 
         Button stop = new Button(this);
-        stop.setText("테스트 종료 / 툴바 제거");
+        stop.setText("툴바 제거 / 서비스 종료");
         stop.setOnClickListener(v -> {
+            Intent hide = new Intent(this, ToolbarService.class);
+            hide.setAction(ToolbarService.ACTION_HIDE);
+            startService(hide);
             stopService(new Intent(this, ToolbarService.class));
-            Toast.makeText(this, "툴바 서비스를 종료했습니다.", Toast.LENGTH_SHORT).show();
-            refreshStatus();
+            refreshDiagnosticsDelayed();
         });
-        LinearLayout.LayoutParams stopLp = new LinearLayout.LayoutParams(-1, -2);
-        stopLp.topMargin = dp(8);
-        root.addView(stop, stopLp);
+        LinearLayout.LayoutParams lp5 = new LinearLayout.LayoutParams(-1, -2);
+        lp5.topMargin = dp(8);
+        root.addView(stop, lp5);
 
-        TextView info = new TextView(this);
-        info.setText("오버레이 권한을 허용한 뒤 앱으로 돌아오면 자동 시작합니다.\n" +
-                "외장 알파벳 하드웨어 키보드가 연결되면 화면 맨 아래 한 줄 툴바가 나타나고, 연결을 끊으면 사라집니다.");
-        info.setTextColor(Color.GRAY);
-        info.setTextSize(14f);
-        LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(-1, -2);
-        infoLp.topMargin = dp(18);
-        root.addView(info, infoLp);
+        diagnostics = new TextView(this);
+        diagnostics.setTextSize(12f);
+        diagnostics.setTextColor(Color.BLACK);
+        diagnostics.setTextIsSelectable(true);
+        diagnostics.setPadding(0, dp(12), 0, dp(24));
+        root.addView(diagnostics, new LinearLayout.LayoutParams(-1, -2));
 
-        setContentView(root);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(root);
+        setContentView(scroll);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         if (Settings.canDrawOverlays(this)) {
-            startService(new Intent(this, ToolbarService.class));
+            Intent i = new Intent(this, ToolbarService.class);
+            i.setAction(ToolbarService.ACTION_AUTO);
+            startService(i);
         } else if (!openedOverlaySettings) {
             openedOverlaySettings = true;
             openOverlayPermission();
         }
         refreshStatus();
+        refreshDiagnosticsDelayed();
     }
 
     private void refreshStatus() {
         if (status == null) return;
-        if (Settings.canDrawOverlays(this)) {
-            status.setText("오버레이 권한: 허용됨\n서비스: 시작 요청됨");
-        } else {
-            status.setText("오버레이 권한: 허용 필요");
-        }
+        status.setText(Settings.canDrawOverlays(this)
+                ? "오버레이 권한: 허용됨"
+                : "오버레이 권한: 허용 필요");
+    }
+
+    private void refreshDiagnostics() {
+        refreshStatus();
+        if (diagnostics != null) diagnostics.setText(ToolbarService.buildDiagnostics(this));
+    }
+
+    private void refreshDiagnosticsDelayed() {
+        if (diagnostics != null) diagnostics.postDelayed(this::refreshDiagnostics, 300);
     }
 
     private void openOverlayPermission() {
