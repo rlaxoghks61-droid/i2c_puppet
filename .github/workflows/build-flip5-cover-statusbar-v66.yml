@@ -1,4 +1,4 @@
-name: Build Flip5 Cover StatusBar v6.6
+name: Build Flip5 Cover StatusBar v6.7
 
 on:
   push:
@@ -23,7 +23,7 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Apply v6.6 UI and signal behavior
+      - name: Apply v6.7 UI and signal behavior
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -140,19 +140,19 @@ jobs:
               hideButKeepSlot(data);
               TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
               if (tm == null) {
-                  hideButKeepSlot(cell);
+                  setIcon(cell, "stat_sys_signal_null_4", fg);
                   return;
               }
               try {
                   if (Build.VERSION.SDK_INT >= 23
                           && checkSelfPermission(Manifest.permission.READ_PHONE_STATE)
                           != PackageManager.PERMISSION_GRANTED) {
-                      hideButKeepSlot(cell);
+                      setIcon(cell, "stat_sys_signal_null_4", fg);
                       return;
                   }
                   ServiceState state = tm.getServiceState();
                   if (state == null || state.getState() != ServiceState.STATE_IN_SERVICE) {
-                      hideButKeepSlot(cell);
+                      setIcon(cell, "stat_sys_signal_null_4", fg);
                       return;
                   }
                   int level = 0;
@@ -164,7 +164,7 @@ jobs:
                       setIcon(cell, "stat_sys_signal_null_4", fg);
                   }
               } catch (Throwable t) {
-                  hideButKeepSlot(cell);
+                  setIcon(cell, "stat_sys_signal_null_4", fg);
               }
           }
 
@@ -179,8 +179,8 @@ jobs:
 
           g = Path('tools/flip5_cover_statusbar_v62/app/build.gradle')
           t = g.read_text()
-          t = re.sub(r'versionCode\s+\d+', 'versionCode 66', t)
-          t = re.sub(r"versionName\s+'[^']+'", "versionName '6.6'", t)
+          t = re.sub(r'versionCode\s+\d+', 'versionCode 67', t)
+          t = re.sub(r"versionName\s+'[^']+'", "versionName '6.7'", t)
           g.write_text(t)
           PY
 
@@ -191,5 +191,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Flip5CoverStatusBar-v6.6-RealSignals-RightNudge
+          name: Flip5CoverStatusBar-v6.7-NoServiceIcon
           path: tools/flip5_cover_statusbar_v62/app/build/outputs/apk/release/*.apk
