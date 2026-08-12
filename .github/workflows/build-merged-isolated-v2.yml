@@ -1,0 +1,366 @@
+name: Build merged isolated CoverRecents + Toolbar v2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "coverrecents-toolbar-isolated-v2" ]
+    paths:
+      - ".github/workflows/build-merged-isolated-v2.yml"
+      - "mergedisolatedv2/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android 36 SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Restore last merged source
+        run: |
+          cat mergedcovertoolbar/part00.txt mergedcovertoolbar/part01.txt mergedcovertoolbar/part02.txt mergedcovertoolbar/part03.txt mergedcovertoolbar/part04.txt > /tmp/merged-source.b64
+          test "$(wc -c < /tmp/merged-source.b64)" = "44988"
+          echo '8cac4a2fa515706964ad95c83bdbeec3fa4944b5a6042167890bea96d02eb4aa  /tmp/merged-source.b64' | sha256sum -c -
+          base64 -d /tmp/merged-source.b64 > /tmp/merged-source.tar.xz
+          echo '8912a97f4fdcf03ed2c7dfb5a8aa795988dced5abb7dea6dfb8192347981e64f  /tmp/merged-source.tar.xz' | sha256sum -c -
+          tar -xJf /tmp/merged-source.tar.xz
+
+      - name: Restore CoverRecents runtime code exactly and isolate toolbar
+        run: |
+          cat > merged_project/app/src/main/java/apps/ijp/coverrecents/CoverRecentsApp.java <<'EOF_COVERAPP'
+package apps.ijp.coverrecents;
+
+import android.app.Application;
+
+import java.util.concurrent.CountDownLatch;
+
+import apps.ijp.coverrecents.service.OriginalValues;
+
+/**
+ * Application state used by RecentsEngine.
+ *
+ * The commercial original exposes a StateFlow through its billing/config ViewModel.
+ * RecentsEngine.a() waits up to five seconds for the first non-null user-Pro Boolean
+ * from that state source and launches ConfigActivity only when the value is false. The
+ * clone omits the commercial framework, so this state/monitor preserves the contract.
+ */
+public final class CoverRecentsApp extends Application {
+    public volatile CountDownLatch essentialsLatch;
+
+    private final Object userProMonitor = new Object();
+    private volatile Boolean originalUserProState;
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+
+        // The original commercial flow is the same Boolean exposed as getIsUserProStatus().
+        // Billing is intentionally absent in this clone, so default to entitled/pro=true.
+        // Set the preference false only when reproducing the original non-Pro follow-up.
+        setOriginalUserProState(
+                getSharedPreferences(OriginalValues.PREFS, MODE_PRIVATE)
+                        .getBoolean(OriginalValues.PREF_USER_PRO_STATUS, true));
+    }
+
+    public void setOriginalUserProState(Boolean state) {
+        synchronized (userProMonitor) {
+            originalUserProState = state;
+            userProMonitor.notifyAll();
+        }
+    }
+
+    /** Returns null on timeout, mirroring withTimeoutOrNull around the original StateFlow. */
+    public Boolean awaitOriginalUserProState(long timeoutMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        synchronized (userProMonitor) {
+            while (originalUserProState == null) {
+                long remaining = deadline - System.currentTimeMillis();
+                if (remaining <= 0L) return null;
+                userProMonitor.wait(remaining);
+            }
+            return originalUserProState;
+        }
+    }
+}
+EOF_COVERAPP
+          cat > merged_project/app/src/main/java/apps/ijp/coverrecents/MainActivity.java <<'EOF_MAIN'
+package apps.ijp.coverrecents;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.os.Bundle;
+import android.provider.Settings;
+import android.view.Gravity;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.Switch;
+import android.widget.TextView;
+
+import apps.ijp.coverrecents.service.OriginalValues;
+
+public final class MainActivity extends Activity {
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        SharedPreferences prefs = getSharedPreferences(OriginalValues.PREFS, MODE_PRIVATE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(22), dp(26), dp(22), dp(26));
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.setBackgroundColor(Color.rgb(250, 250, 250));
+
+        TextView title = new TextView(this);
+        title.setText("CoverScreen Recents — Original Core");
+        title.setTextSize(22f);
+        title.setTextColor(Color.BLACK);
+        title.setPadding(0, 0, 0, dp(18));
+        root.addView(title, matchWrap());
+
+        TextView info = new TextView(this);
+        info.setText("원본 APK의 RecentsEngine DEX 흐름과 같은 커버 화면 최근 앱 경로입니다.\n" +
+                "접근성 서비스를 켠 뒤 커버 화면 하단에서 제스처를 사용하세요.");
+        info.setTextSize(15f);
+        info.setTextColor(Color.DKGRAY);
+        info.setPadding(0, 0, 0, dp(22));
+        root.addView(info, matchWrap());
+
+        Switch spay = new Switch(this);
+        spay.setText("Samsung Pay 호환 모드");
+        spay.setTextSize(16f);
+        spay.setChecked(prefs.getBoolean(OriginalValues.PREF_SPAY, false));
+        spay.setOnCheckedChangeListener((buttonView, checked) ->
+                prefs.edit().putBoolean(OriginalValues.PREF_SPAY, checked).apply());
+        root.addView(spay, matchWrap());
+
+        Button accessibility = new Button(this);
+        accessibility.setText("접근성 설정 열기");
+        accessibility.setOnClickListener(v ->
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        root.addView(accessibility, matchWrap());
+
+        setContentView(root);
+    }
+
+    private LinearLayout.LayoutParams matchWrap() {
+        return new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+}
+EOF_MAIN
+          cat > merged_project/app/src/main/AndroidManifest.xml <<'EOF_MANIFEST'
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+
+    <uses-permission android:name="apps.ijp.coverrecents.INTERNAL" />
+    <permission
+        android:name="apps.ijp.coverrecents.INTERNAL"
+        android:protectionLevel="signature"
+        android:label="Cover Recents Internal" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".CoverRecentsApp"
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:icon="@drawable/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:taskAffinity="apps.ijp.coverrecents.mainApp"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".fold.FoldShortcutActivity"
+            android:label="@string/fold_shortcut_label"
+            android:theme="@style/FoldShortcutTheme"
+            android:process=":fold"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.ACCESSIBILITY_SHORTCUT_TARGET" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityshortcut.target"
+                android:resource="@xml/fold_shortcut_target" />
+        </activity>
+
+        <activity android:name=".service.Essentials" android:theme="@style/HelperTheme" android:exported="false" android:excludeFromRecents="true" android:launchMode="singleTop" android:noHistory="true" />
+        <activity android:name=".service.UnlockActivity" android:theme="@style/HelperTheme" android:exported="false" android:excludeFromRecents="true" android:launchMode="singleTop" android:showOnLockScreen="true" android:turnScreenOn="true" />
+        <activity android:name=".service.ToastActivity" android:theme="@style/HelperTheme" android:exported="false" android:excludeFromRecents="true" android:launchMode="singleTop" android:noHistory="true" />
+        <activity android:name=".service.ConfigActivity" android:theme="@style/ConfigHelperTheme" android:exported="false" android:taskAffinity="" android:excludeFromRecents="true" android:launchMode="singleInstance" android:noHistory="true" android:showOnLockScreen="true" android:documentLaunchMode="never" android:showWhenLocked="true" />
+
+        <activity
+            android:name="com.bbq20kbd.toolbar.test.MainActivity"
+            android:label="하드웨어 키보드 툴바"
+            android:process=":kbdtoolbar"
+            android:taskAffinity="apps.ijp.coverrecents.kbdtoolbar"
+            android:exported="true" />
+
+        <activity
+            android:name="com.bbq20kbd.toolbar.test.ClipboardCaptureActivity"
+            android:process=":kbdtoolbar"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <provider
+            android:name="com.bbq20kbd.toolbar.test.ClipboardImageProvider"
+            android:authorities="${applicationId}.kbdtoolbar.clipboard"
+            android:process=":kbdtoolbar"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+        <service
+            android:name="com.bbq20kbd.toolbar.test.ToolbarService"
+            android:process=":kbdtoolbar"
+            android:exported="false" />
+
+        <service
+            android:name="com.bbq20kbd.toolbar.test.KeyboardAccessibilityService"
+            android:label="하드웨어 키보드 툴바"
+            android:process=":kbdtoolbar"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/kbdtoolbar_accessibility_service_config" />
+        </service>
+
+        <service
+            android:name=".service.RecentsEngine"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/recents_engine_config" />
+        </service>
+    </application>
+</manifest>
+EOF_MANIFEST
+          cat > merged_project/app/src/main/res/values/strings.xml <<'EOF_STRINGS'
+<resources>
+    <string name="app_name">CoverScreen Recents</string>
+    <string name="accessibility_description">CoverScreen Recents gesture service</string>
+    <string name="fold_shortcut_label">화면 전환</string>
+    <string name="fold_shortcut_description">측면 버튼과 음량 올리기 버튼으로 메인 화면과 커버 화면 상태를 전환합니다.</string>
+    <string name="fold_shortcut_summary">Power + Volume Up 화면 전환</string>
+    <string name="kbdtoolbar_accessibility_description">하드웨어 키보드 툴바에서 현재 입력 칸에 이모지·특수문자를 넣고 복사·붙여넣기·선택 기능을 사용합니다.</string>
+</resources>
+EOF_STRINGS
+          rm -f merged_project/app/src/main/res/xml/keyboard_toolbar_config.xml
+          cat > merged_project/app/src/main/res/xml/kbdtoolbar_accessibility_service_config.xml <<'EOF_KBDXML'
+<?xml version="1.0" encoding="utf-8"?>
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewFocused|typeViewTextChanged|typeViewTextSelectionChanged|typeWindowStateChanged|typeWindowsChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagInputMethodEditor|flagRequestFilterKeyEvents"
+    android:canRetrieveWindowContent="true"
+    android:canRequestFilterKeyEvents="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/kbdtoolbar_accessibility_description"
+    android:notificationTimeout="50" />
+EOF_KBDXML
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('merged_project/app/build.gradle.kts')
+          s=p.read_text()
+          s=s.replace('versionCode = 11', 'versionCode = 12')
+          s=s.replace('versionName = "CR_BETA_3.1+Toolbar2.9"', 'versionName = "CR_BETA_3.1+Toolbar2.9-isolated"')
+          p.write_text(s)
+
+          files = [
+              Path('merged_project/app/src/main/java/com/bbq20kbd/toolbar/test/ClipboardCaptureActivity.java'),
+              Path('merged_project/app/src/main/java/com/bbq20kbd/toolbar/test/ClipboardImageProvider.java'),
+              Path('merged_project/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java'),
+              Path('merged_project/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java'),
+          ]
+          for p in files:
+              s=p.read_text()
+              s=s.replace('getPackageName() + ".clipboard"', 'getPackageName() + ".kbdtoolbar.clipboard"')
+              s=s.replace('new File(getFilesDir(), "clipboard_images")', 'new File(new File(getFilesDir(), "kbdtoolbar"), "clipboard_images")')
+              s=s.replace('new File(getContext().getFilesDir(), "clipboard_images")', 'new File(new File(getContext().getFilesDir(), "kbdtoolbar"), "clipboard_images")')
+              s=s.replace('getSharedPreferences("toolbar", MODE_PRIVATE)', 'getSharedPreferences("kbdtoolbar", MODE_PRIVATE)')
+              p.write_text(s)
+          PY
+
+      - name: Verify CoverRecents code is byte-for-byte original
+        working-directory: merged_project
+        run: |
+          cat > /tmp/coverrecents.sha256 <<'EOF_HASHES'
+          e916282c5ae354b9a9edc9e24bfd3018c03034b6a80f02d9cf8e81b42d6b5b3a  app/src/main/java/apps/ijp/coverrecents/CoverRecentsApp.java
+          cae2bd0b0fd9584326e88685af5fbd8c50ae154c80bd6aafdeb78bf65d606841  app/src/main/java/apps/ijp/coverrecents/MainActivity.java
+          a8134c67135094ba99a81f157b8a584e6a8fccb16ca23faf70301deef785f524  app/src/main/java/apps/ijp/coverrecents/fold/FoldShortcutActivity.java
+          c85f5f2a9e43b80ae1805aedaf7bf050138550313e147bdf09fee94718d00e51  app/src/main/java/apps/ijp/coverrecents/fold/FoldStateController.java
+          3d211230d45e93eead0744bae0ef9d3b256ca076fa520c68666be6cae71d6561  app/src/main/java/apps/ijp/coverrecents/service/ConfigActivity.java
+          919a826169eb62d7e3a07b48fa502178542164b1bd3331a7511c4eb9adc1b26f  app/src/main/java/apps/ijp/coverrecents/service/Essentials.java
+          5234f92dd33ebbc24336fdb24c16ac1a3816e6ae80427986515a7b3602363df3  app/src/main/java/apps/ijp/coverrecents/service/OriginalEventSelectors.java
+          5c274620bdf8a48e59c917e38b23131eb6bc1a17732dc311fcba6fdd88c2a47a  app/src/main/java/apps/ijp/coverrecents/service/OriginalValues.java
+          8581cf4beb2bd93044937bd24e83be9eb429eba1afe55496e300b64004876dea  app/src/main/java/apps/ijp/coverrecents/service/RecentsEngine.java
+          1cb5422871ae58213ec899f2b172f1d42aec468b91b2c784be022bf4d8fc4124  app/src/main/java/apps/ijp/coverrecents/service/ToastActivity.java
+          7f7bfa56d131f95c0a4687bce1574f48c12cd1eba874dec49a8ba6e71c98a124  app/src/main/java/apps/ijp/coverrecents/service/UnlockActivity.java
+EOF_HASHES
+          sha256sum -c /tmp/coverrecents.sha256
+          grep -q 'android:process=":kbdtoolbar"' app/src/main/AndroidManifest.xml
+          ! grep -R 'getSharedPreferences("toolbar"' app/src/main/java/com/bbq20kbd/toolbar/test
+          ! grep -R 'getPackageName() + ".clipboard"' app/src/main/java/com/bbq20kbd/toolbar/test
+
+      - name: Build isolated merged APK
+        working-directory: merged_project
+        run: gradle :app:assembleDebug
+
+      - name: Package source
+        run: |
+          zip -qr CoverRecents-HardwareToolbar-Isolated-v2-source.zip merged_project
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CoverRecents-HardwareToolbar-Isolated-v2
+          path: |
+            merged_project/app/build/outputs/apk/debug/app-debug.apk
+            CoverRecents-HardwareToolbar-Isolated-v2-source.zip
