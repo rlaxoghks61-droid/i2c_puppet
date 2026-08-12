@@ -5,10 +5,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
+import android.hardware.display.DisplayManager;
 import android.hardware.input.InputManager;
 import android.os.IBinder;
 import android.provider.Settings;
 import android.util.Log;
+import android.view.Display;
 import android.view.Gravity;
 import android.view.InputDevice;
 import android.view.View;
@@ -23,11 +25,14 @@ public class ToolbarService extends Service implements InputManager.InputDeviceL
     public static final String ACTION_FORCE_SHOW = "com.bbq20kbd.toolbar.test.FORCE_SHOW";
     public static final String ACTION_HIDE = "com.bbq20kbd.toolbar.test.HIDE";
 
+    private static final int COVER_DISPLAY_ID = 1;
     private static volatile String lastOverlayError = "없음";
     private static volatile String lastOverlayState = "서비스 미실행";
+    private static volatile int lastTargetDisplayId = -1;
 
     private InputManager inputManager;
     private WindowManager windowManager;
+    private Context overlayContext;
     private View toolbar;
     private boolean forceShow;
 
@@ -35,7 +40,6 @@ public class ToolbarService extends Service implements InputManager.InputDeviceL
     public void onCreate() {
         super.onCreate();
         inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);
-        windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
         if (inputManager != null) inputManager.registerInputDeviceListener(this, null);
         lastOverlayState = "서비스 실행됨";
         updateToolbar();
@@ -85,7 +89,7 @@ public class ToolbarService extends Service implements InputManager.InputDeviceL
             return;
         }
         if (hasExternalAlphabeticKeyboard()) {
-            lastOverlayState = "외장 알파벳 키보드 감지됨";
+            lastOverlayState = "외장 알파벳 키보드 감지됨 - 커버 Display 1 표시 시도";
             showToolbar();
         } else {
             lastOverlayState = "외장 알파벳 키보드 미감지";
@@ -106,27 +110,66 @@ public class ToolbarService extends Service implements InputManager.InputDeviceL
         return false;
     }
 
+    private boolean prepareCoverWindowManager() {
+        try {
+            DisplayManager dm = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
+            Display cover = dm != null ? dm.getDisplay(COVER_DISPLAY_ID) : null;
+            if (cover == null) {
+                lastTargetDisplayId = -1;
+                lastOverlayState = "커버 Display 1을 찾지 못함";
+                lastOverlayError = "DisplayManager.getDisplay(1) == null";
+                return false;
+            }
+
+            if (overlayContext == null || lastTargetDisplayId != COVER_DISPLAY_ID || windowManager == null) {
+                Context displayContext = createDisplayContext(cover);
+                overlayContext = displayContext.createWindowContext(
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null);
+                windowManager = overlayContext.getSystemService(WindowManager.class);
+                lastTargetDisplayId = cover.getDisplayId();
+            }
+
+            if (windowManager == null) {
+                lastOverlayState = "커버 Display 1 WindowManager 없음";
+                lastOverlayError = "getSystemService(WindowManager.class) == null";
+                return false;
+            }
+            return true;
+        } catch (Throwable t) {
+            windowManager = null;
+            overlayContext = null;
+            lastTargetDisplayId = -1;
+            lastOverlayError = t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage());
+            lastOverlayState = "커버 Display 1 WindowContext 생성 실패";
+            Log.e("HWToolbarTest", "prepareCoverWindowManager failed", t);
+            return false;
+        }
+    }
+
     private void showToolbar() {
         if (!Settings.canDrawOverlays(this)) {
             lastOverlayState = "표시 실패: 오버레이 권한 없음";
             return;
         }
-        if (toolbar != null || windowManager == null) return;
+        if (toolbar != null) return;
+        if (!prepareCoverWindowManager()) return;
 
-        LinearLayout bar = new LinearLayout(this);
+        Context c = overlayContext != null ? overlayContext : this;
+
+        LinearLayout bar = new LinearLayout(c);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(dp(10), 0, dp(6), 0);
         bar.setBackgroundColor(Color.argb(255, 235, 235, 235));
 
-        TextView status = new TextView(this);
-        status.setText(forceShow ? "⌨  TEST TOOLBAR (강제 표시)" : "⌨  하드웨어 키보드");
+        TextView status = new TextView(c);
+        status.setText(forceShow ? "⌨ COVER TEST (Display 1)" : "⌨ 하드웨어 키보드");
         status.setTextSize(14f);
         status.setTextColor(Color.BLACK);
         LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(0, -2, 1f);
         bar.addView(status, textLp);
 
-        Button ime = new Button(this);
+        Button ime = new Button(c);
         ime.setText("IME");
         ime.setAllCaps(false);
         ime.setMinWidth(0);
@@ -137,7 +180,7 @@ public class ToolbarService extends Service implements InputManager.InputDeviceL
         });
         bar.addView(ime, new LinearLayout.LayoutParams(dp(70), dp(44)));
 
-        Button close = new Button(this);
+        Button close = new Button(c);
         close.setText("×");
         close.setTextSize(20f);
         close.setMinWidth(0);
@@ -157,18 +200,20 @@ public class ToolbarService extends Service implements InputManager.InputDeviceL
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.BOTTOM;
-        lp.setTitle("HWKeyboardToolbarTestV2");
+        lp.setTitle("HWKeyboardToolbarCoverDisplay1");
 
         try {
             windowManager.addView(bar, lp);
             toolbar = bar;
             lastOverlayError = "없음";
-            lastOverlayState = forceShow ? "강제 툴바 표시 성공" : "자동 툴바 표시 성공";
-        } catch (Exception e) {
+            lastOverlayState = forceShow
+                    ? "커버 Display 1 강제 툴바 표시 성공"
+                    : "커버 Display 1 자동 툴바 표시 성공";
+        } catch (Throwable t) {
             toolbar = null;
-            lastOverlayError = e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage());
-            lastOverlayState = "WindowManager.addView 실패";
-            Log.e("HWToolbarTest", "addView failed", e);
+            lastOverlayError = t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage());
+            lastOverlayState = "커버 Display 1 WindowManager.addView 실패";
+            Log.e("HWToolbarTest", "cover addView failed", t);
         }
     }
 
@@ -176,8 +221,8 @@ public class ToolbarService extends Service implements InputManager.InputDeviceL
         if (toolbar == null || windowManager == null) return;
         try {
             windowManager.removeView(toolbar);
-        } catch (Exception e) {
-            Log.e("HWToolbarTest", "removeView failed", e);
+        } catch (Throwable t) {
+            Log.e("HWToolbarTest", "removeView failed", t);
         }
         toolbar = null;
     }
@@ -185,9 +230,29 @@ public class ToolbarService extends Service implements InputManager.InputDeviceL
     public static String buildDiagnostics(Context context) {
         StringBuilder sb = new StringBuilder();
         sb.append("오버레이 권한: ").append(Settings.canDrawOverlays(context) ? "허용됨" : "없음").append('\n');
+        sb.append("목표 Display ID: ").append(COVER_DISPLAY_ID).append('\n');
+        sb.append("실제 WindowContext Display ID: ").append(lastTargetDisplayId).append('\n');
         sb.append("상태: ").append(lastOverlayState).append('\n');
         sb.append("마지막 addView 오류: ").append(lastOverlayError).append("\n\n");
-        sb.append("InputDevice 목록:\n");
+
+        sb.append("Display 목록:\n");
+        try {
+            DisplayManager dm = (DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE);
+            Display[] displays = dm != null ? dm.getDisplays() : new Display[0];
+            for (Display d : displays) {
+                sb.append("displayId=").append(d.getDisplayId())
+                        .append(" state=").append(d.getState())
+                        .append(" name=").append(d.getName())
+                        .append(" mode=").append(d.getMode().getPhysicalWidth())
+                        .append('x').append(d.getMode().getPhysicalHeight())
+                        .append('\n');
+            }
+        } catch (Throwable t) {
+            sb.append("Display 조회 오류: ").append(t.getClass().getSimpleName())
+                    .append(": ").append(String.valueOf(t.getMessage())).append('\n');
+        }
+
+        sb.append("\nInputDevice 목록:\n");
         int[] ids = InputDevice.getDeviceIds();
         if (ids.length == 0) sb.append("(없음)\n");
         for (int id : ids) {
@@ -204,6 +269,7 @@ public class ToolbarService extends Service implements InputManager.InputDeviceL
     }
 
     private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
+        Context c = overlayContext != null ? overlayContext : this;
+        return Math.round(value * c.getResources().getDisplayMetrics().density);
     }
 }
