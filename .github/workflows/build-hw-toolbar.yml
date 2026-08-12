@@ -6,7 +6,7 @@ on:
     branches: [ "hw-keyboard-toolbar-final" ]
     paths:
       - ".github/workflows/build-hw-toolbar.yml"
-      - "toolbar-v8-overrides.tar.gz.b64"
+      - "v11b/**"
 
 jobs:
   build:
@@ -29,48 +29,15 @@ jobs:
         run: git show dcdb6004fee243751ae70d5e172583533dea8b35:android-toolbar.zip > android-toolbar.zip
       - name: Unpack project
         run: mkdir -p android-toolbar && unzip -q android-toolbar.zip -d android-toolbar
-      - name: Apply v8 toolbar overrides
+      - name: Apply v11 Samsung translation overrides
         run: |
-          base64 -d toolbar-v8-overrides.tar.gz.b64 > toolbar-v8-overrides.tar.gz
-          tar -xzf toolbar-v8-overrides.tar.gz -C android-toolbar
-      - name: Patch v9 popup behavior
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path('android-toolbar/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java')
-          s = p.read_text()
-
-          s = s.replace('import android.os.IBinder;\n', 'import android.os.IBinder;\nimport android.os.Handler;\nimport android.os.Looper;\n')
-          s = s.replace('    private static final int TOOLBAR_TRANSPARENCY_PERCENT = 90;\n', '    private static final int TOOLBAR_TRANSPARENCY_PERCENT = 90;\n    private static final int PANEL_TRANSPARENCY_PERCENT = 60;\n')
-          s = s.replace('    private ClipboardManager.OnPrimaryClipChangedListener clipListener;\n', '    private ClipboardManager.OnPrimaryClipChangedListener clipListener;\n    private final Handler mainHandler = new Handler(Looper.getMainLooper());\n')
-          s = s.replace('    private void requestClipboardPanel() {\n        try {', '    private void requestClipboardPanel() {\n        // 다른 팝업이 열려 있어도 툴바 버튼을 누르면 즉시 전환한다.\n        hidePanel();\n        try {')
-
-          old = '''    private void showNumberPanel() {\n        LinearLayout row = new LinearLayout(uiContext());\n        row.setOrientation(LinearLayout.HORIZONTAL);\n        row.setGravity(Gravity.CENTER);\n        row.setBackgroundColor(panelBackgroundColor());\n        row.setPadding(dp(2), 0, dp(2), 0);\n\n        String[] digits = {"1","2","3","4","5","6","7","8","9","0"};\n        for (String digit : digits) {\n            TextView key = new TextView(uiContext());\n            key.setText(digit);\n            key.setTextColor(panelTextColor());\n            key.setTextSize(18f);\n            key.setGravity(Gravity.CENTER);\n            key.setOnClickListener(v -> insertTextKeepPanel(digit));\n            row.addView(key, new LinearLayout.LayoutParams(0, dp(38), 1f));\n        }\n\n        // 숫자 패드는 제목 없이 정확히 한 줄만 표시하며, 바깥을 누르면 기존 showPanel 처리로 닫힌다.\n        showPanel(row, dp(38));\n    }'''
-          new = '''    private void showNumberPanel() {\n        LinearLayout content = panelContainer();\n        addPanelTitle(content, "숫자");\n\n        LinearLayout row = new LinearLayout(uiContext());\n        row.setOrientation(LinearLayout.HORIZONTAL);\n        row.setGravity(Gravity.CENTER);\n        // 이모지/특수문자와 같은 좌우 안쪽 여백.\n        row.setPadding(dp(4), 0, dp(4), 0);\n\n        String[] digits = {"1","2","3","4","5","6","7","8","9","0"};\n        for (String digit : digits) {\n            TextView key = new TextView(uiContext());\n            key.setText(digit);\n            key.setTextColor(panelTextColor());\n            key.setTextSize(18f);\n            key.setGravity(Gravity.CENTER);\n            key.setOnClickListener(v -> insertTextKeepPanel(digit));\n            row.addView(key, new LinearLayout.LayoutParams(0, dp(38), 1f));\n        }\n\n        content.addView(row, new LinearLayout.LayoutParams(-1, dp(38)));\n        showPanel(content, dp(70));\n    }'''
-          if old not in s:
-              raise SystemExit('showNumberPanel block not found')
-          s = s.replace(old, new)
-
-          s = s.replace('    private void openSystemSettings() {\n        try {', '    private void openSystemSettings() {\n        hidePanel();\n        try {')
-          s = s.replace('        return dark ? Color.argb(235, 28, 28, 28) : Color.argb(235, 250, 250, 250);', '        int alpha = Math.round(255f * (100 - PANEL_TRANSPARENCY_PERCENT) / 100f);\n        return dark ? Color.argb(alpha, 28, 28, 28) : Color.argb(alpha, 250, 250, 250);')
-
-          old_outside = '''            if (event.getAction() == android.view.MotionEvent.ACTION_OUTSIDE) {\n                hidePanel();\n                return true;\n            }'''
-          new_outside = '''            if (event.getAction() == android.view.MotionEvent.ACTION_OUTSIDE) {\n                // 팝업 바깥은 닫되, 툴바의 다른 기능을 누른 경우에는\n                // 새 팝업으로 바로 전환되도록 짧게 지연하고 기존 패널인지 확인한다.\n                final View outsidePanel = content;\n                mainHandler.postDelayed(() -> {\n                    if (panel == outsidePanel) hidePanel();\n                }, 80);\n                return false;\n            }'''
-          if old_outside not in s:
-              raise SystemExit('outside touch block not found')
-          s = s.replace(old_outside, new_outside)
-
-          p.write_text(s)
-
-          b = Path('android-toolbar/app/build.gradle.kts')
-          t = b.read_text().replace('versionCode = 9', 'versionCode = 10').replace('versionName = "1.5"', 'versionName = "1.6"')
-          b.write_text(t)
-          PY
+          cat v11b/part*.txt > toolbar-v11-overrides.tar.gz.b64
+          base64 -d toolbar-v11-overrides.tar.gz.b64 > toolbar-v11-overrides.tar.gz
+          tar -xzf toolbar-v11-overrides.tar.gz -C android-toolbar
       - name: Build
         working-directory: android-toolbar
         run: gradle :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: HardwareKeyboardToolbar-v9
+          name: HardwareKeyboardToolbar-v11-SamsungTranslate
           path: android-toolbar/app/build/outputs/apk/debug/app-debug.apk
