@@ -1,0 +1,195 @@
+diff -ruN a/app/build.gradle.kts b/app/build.gradle.kts
+--- a/app/build.gradle.kts	2026-08-12 06:27:26.000000000 +0000
++++ b/app/build.gradle.kts	2026-08-12 06:46:25.337894279 +0000
+@@ -10,8 +10,8 @@
+         applicationId = "com.bbq20kbd.toolbar.test"
+         minSdk = 31
+         targetSdk = 36
+-        versionCode = 21
+-        versionName = "2.8"
++        versionCode = 22
++        versionName = "2.9"
+     }
+ 
+     compileOptions {
+diff -ruN a/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java b/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java
+--- a/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java	2026-08-12 06:27:26.000000000 +0000
++++ b/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java	2026-08-12 06:46:25.337218263 +0000
+@@ -14,6 +14,7 @@
+ import android.os.SystemClock;
+ import android.text.TextUtils;
+ import android.util.Log;
++import android.view.KeyEvent;
+ import android.view.accessibility.AccessibilityEvent;
+ import android.view.accessibility.AccessibilityNodeInfo;
+ 
+@@ -26,6 +27,7 @@
+     private static final long EDIT_GROUP_MS = 900;
+     private static KeyboardAccessibilityService instance;
+     private InputMethod accessibilityInputMethod;
++    private boolean consumingBackKeySequence;
+ 
+     private static class EditState {
+         final String key;
+@@ -57,9 +59,13 @@
+     if (Build.VERSION.SDK_INT >= 33) {
+         try {
+             AccessibilityServiceInfo info = getServiceInfo();
+-            if (info != null && (info.flags & AccessibilityServiceInfo.FLAG_INPUT_METHOD_EDITOR) == 0) {
+-                info.flags |= AccessibilityServiceInfo.FLAG_INPUT_METHOD_EDITOR;
+-                setServiceInfo(info);
++            if (info != null) {
++                int wanted = AccessibilityServiceInfo.FLAG_INPUT_METHOD_EDITOR |
++                        AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
++                if ((info.flags & wanted) != wanted) {
++                    info.flags |= wanted;
++                    setServiceInfo(info);
++                }
+             }
+         } catch (Exception e) {
+             Log.w("HWKeyboardInput", "Unable to enable accessibility IME flag", e);
+@@ -97,6 +103,26 @@
+     }
+ 
+     @Override
++    protected boolean onKeyEvent(KeyEvent event) {
++        if (event == null || event.getKeyCode() != KeyEvent.KEYCODE_BACK) return false;
++
++        if (event.getAction() == KeyEvent.ACTION_DOWN) {
++            if (consumingBackKeySequence) return true;
++            if (ToolbarService.dismissOpenPanelForBackButton()) {
++                consumingBackKeySequence = true;
++                return true;
++            }
++            return false;
++        }
++
++        if (event.getAction() == KeyEvent.ACTION_UP && consumingBackKeySequence) {
++            consumingBackKeySequence = false;
++            return true;
++        }
++        return consumingBackKeySequence;
++    }
++
++    @Override
+     public void onInterrupt() {
+     }
+ 
+diff -ruN a/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java b/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java
+--- a/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java	2026-08-12 06:27:26.000000000 +0000
++++ b/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java	2026-08-12 06:46:25.337744617 +0000
+@@ -32,6 +32,7 @@
+ import android.text.TextUtils;
+ import android.view.Display;
+ import android.view.Gravity;
++import android.view.MotionEvent;
+ import android.view.InputDevice;
+ import android.view.View;
+ import android.view.WindowManager;
+@@ -126,6 +127,8 @@
+     private final Runnable scanScreenshotRunnable = this::scanNewestScreenshot;
+     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+     private long panelShownUptimeMs;
++    private float toolbarGestureDownY;
++    private boolean toolbarGestureTracking;
+ 
+     private static final class ClipboardEntry {
+         static final String TYPE_TEXT = "text";
+@@ -342,7 +345,13 @@
+         final int baseRgb = dark ? Color.BLACK : Color.WHITE;
+         final int alpha = Math.round(255f * (100 - TOOLBAR_TRANSPARENCY_PERCENT) / 100f);
+ 
+-        LinearLayout bar = new LinearLayout(uiContext());
++        LinearLayout bar = new LinearLayout(uiContext()) {
++            @Override
++            public boolean dispatchTouchEvent(MotionEvent event) {
++                observeToolbarNavigationGesture(event);
++                return super.dispatchTouchEvent(event);
++            }
++        };
+         bar.setOrientation(LinearLayout.HORIZONTAL);
+         bar.setGravity(Gravity.CENTER);
+         bar.setPadding(dp(2), 0, dp(2), 0);
+@@ -423,6 +432,47 @@
+         return button;
+     }
+ 
++    private void observeToolbarNavigationGesture(MotionEvent event) {
++        if (event == null) return;
++        switch (event.getActionMasked()) {
++            case MotionEvent.ACTION_DOWN:
++                toolbarGestureDownY = event.getRawY();
++                toolbarGestureTracking = true;
++                break;
++            case MotionEvent.ACTION_MOVE:
++                if (toolbarGestureTracking && toolbarGestureDownY - event.getRawY() >= dp(12)) {
++                    toolbarGestureTracking = false;
++                    if (panel != null) hidePanel();
++                    Log.d(TAG, "Panel dismissed on bottom upward navigation gesture");
++                }
++                break;
++            case MotionEvent.ACTION_CANCEL:
++                if (toolbarGestureTracking && panel != null) {
++                    hidePanel();
++                    Log.d(TAG, "Panel dismissed when system navigation took toolbar touch");
++                }
++                toolbarGestureTracking = false;
++                break;
++            case MotionEvent.ACTION_UP:
++                toolbarGestureTracking = false;
++                break;
++            default:
++                break;
++        }
++    }
++
++    public static boolean dismissOpenPanelForBackButton() {
++        ToolbarService service = instance;
++        if (service == null || service.panel == null) return false;
++        service.mainHandler.post(() -> {
++            if (service == instance && service.panel != null) {
++                service.hidePanel();
++                Log.d(TAG, "Panel dismissed and Back button consumed");
++            }
++        });
++        return true;
++    }
++
+     public static void dismissOpenPanelFromSystemWindowChange(CharSequence packageName) {
+         ToolbarService service = instance;
+         if (service == null || service.panel == null) return;
+@@ -910,16 +960,10 @@
+ 
+     private void insertTextKeepPanel(String text) {
+         KeyboardAccessibilityService a = KeyboardAccessibilityService.get();
+-        if (a != null && a.insertText(text)) {
+-            return;
+-        }
+-        if (clipboardManager != null) {
+-            suppressInternalClipboardCapture();
+-            clipboardManager.setPrimaryClip(ClipData.newPlainText("text", text));
+-            Toast.makeText(uiContext(), "클립보드에 복사했습니다. 접근성을 켜면 바로 입력됩니다.", Toast.LENGTH_SHORT).show();
+-        } else {
+-            accessibilityNeeded();
+-        }
++        if (a == null) return;
++        // Emoji/symbol/number buttons are input-only. If there is no editable target,
++        // do nothing: never fall back to copying the pressed character to clipboard.
++        a.insertText(text);
+     }
+ 
+     private void insertText(String text) {
+diff -ruN a/app/src/main/res/xml/accessibility_service_config.xml b/app/src/main/res/xml/accessibility_service_config.xml
+--- a/app/src/main/res/xml/accessibility_service_config.xml	2026-08-12 06:27:26.000000000 +0000
++++ b/app/src/main/res/xml/accessibility_service_config.xml	2026-08-12 06:46:25.337837675 +0000
+@@ -2,8 +2,9 @@
+ <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+     android:accessibilityEventTypes="typeViewFocused|typeViewTextChanged|typeViewTextSelectionChanged|typeWindowStateChanged|typeWindowsChanged|typeWindowContentChanged"
+     android:accessibilityFeedbackType="feedbackGeneric"
+-    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagInputMethodEditor"
++    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagInputMethodEditor|flagRequestFilterKeyEvents"
+     android:canRetrieveWindowContent="true"
++    android:canRequestFilterKeyEvents="true"
+     android:canTakeScreenshot="true"
+     android:description="@string/accessibility_description"
+     android:notificationTimeout="50" />
