@@ -1,0 +1,85 @@
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -10,8 +10,8 @@
+         applicationId = "com.bbq20kbd.toolbar.test"
+         minSdk = 31
+         targetSdk = 36
+-        versionCode = 17
+-        versionName = "2.4"
++        versionCode = 18
++        versionName = "2.5"
+     }
+ 
+     compileOptions {
+--- a/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java
++++ b/app/src/main/java/com/bbq20kbd/toolbar/test/ToolbarService.java
+@@ -786,7 +786,7 @@
+             cell.setTextSize(title.equals("이모지") ? 20f : 17f);
+             cell.setTextColor(panelTextColor());
+             cell.setGravity(Gravity.CENTER);
+-            cell.setOnClickListener(v -> insertText(value));
++            cell.setOnClickListener(v -> insertTextKeepPanel(value));
+             GridLayout.LayoutParams glp = new GridLayout.LayoutParams();
+             glp.width = 0;
+             glp.height = dp(38);
+@@ -902,6 +902,7 @@
+             return;
+         }
+         if (clipboardManager != null) {
++            suppressInternalClipboardCapture();
+             clipboardManager.setPrimaryClip(ClipData.newPlainText("text", text));
+             Toast.makeText(uiContext(), "클립보드에 복사했습니다. 접근성을 켜면 바로 입력됩니다.", Toast.LENGTH_SHORT).show();
+         } else {
+@@ -1038,8 +1039,18 @@
+     }
+ 
+     private void captureClipboardIfReadable() {
++        if (prefs != null) {
++            long suppressUntil = prefs.getLong("suppress_clip_capture_until", 0L);
++            if (System.currentTimeMillis() < suppressUntil) return;
++        }
+         String text = readClipboardText();
+         if (!TextUtils.isEmpty(text)) rememberText(text);
++    }
++
++    private void suppressInternalClipboardCapture() {
++        if (prefs != null) {
++            prefs.edit().putLong("suppress_clip_capture_until", System.currentTimeMillis() + 800L).apply();
++        }
+     }
+ 
+     private boolean isImageClip(ClipData clip) {
+--- a/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java
++++ b/app/src/main/java/com/bbq20kbd/toolbar/test/KeyboardAccessibilityService.java
+@@ -224,8 +224,29 @@
+         }
+ 
+         ClipboardManager cb = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+-        if (cb != null) cb.setPrimaryClip(ClipData.newPlainText("text", insertion));
+-        return node.performAction(AccessibilityNodeInfo.ACTION_PASTE);
++        final ClipData previousClip = (cb != null && cb.hasPrimaryClip()) ? cb.getPrimaryClip() : null;
++        if (cb != null) {
++            getSharedPreferences("toolbar", MODE_PRIVATE).edit()
++                    .putLong("suppress_clip_capture_until", System.currentTimeMillis() + 800L).apply();
++            cb.setPrimaryClip(ClipData.newPlainText("text", insertion));
++        }
++        boolean pasted = node.performAction(AccessibilityNodeInfo.ACTION_PASTE);
++        if (cb != null) {
++            new android.os.Handler(getMainLooper()).postDelayed(() -> {
++                try {
++                    getSharedPreferences("toolbar", MODE_PRIVATE).edit()
++                            .putLong("suppress_clip_capture_until", System.currentTimeMillis() + 800L).apply();
++                    if (previousClip != null) {
++                        cb.setPrimaryClip(previousClip);
++                    } else if (Build.VERSION.SDK_INT >= 28) {
++                        cb.clearPrimaryClip();
++                    }
++                } catch (Exception e) {
++                    Log.w("HWKeyboardInput", "Unable to restore clipboard after toolbar input", e);
++                }
++            }, 150L);
++        }
++        return pasted;
+     }
+ 
+     public boolean pasteClipboard() {
