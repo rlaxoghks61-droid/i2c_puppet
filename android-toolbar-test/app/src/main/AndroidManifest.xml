@@ -19,6 +19,6 @@
 
         <service
             android:name=".ToolbarService"
-            android:exported="false" />
+            android:exported="true" />
     </application>
 </manifest>
