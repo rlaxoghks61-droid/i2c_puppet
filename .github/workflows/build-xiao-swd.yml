@@ -22,6 +22,16 @@ jobs:
       - name: Compile Seeed XIAO nRF52840 CMSIS-DAP
         run: |
           arduino-cli compile --fqbn Seeeduino:nrf52:xiaonRF52840 --output-dir build_xiao_swd NRF52_XIAO_SWD
+      - name: Convert HEX to UF2 (XIAO nRF52840)
+        run: |
+          set -euo pipefail
+          CONVERTER=$(find ~/.arduino15/packages/Seeeduino/hardware/nrf52 -path '*/tools/uf2conv/uf2conv.py' -print -quit)
+          test -n "$CONVERTER" || { echo "Cannot find Seeed UF2 converter"; exit 1; }
+          python3 "$CONVERTER" \
+            -c -f 0xADA52840 \
+            -o build_xiao_swd/XIAO_nRF52840_CMSIS_DAP.uf2 \
+            build_xiao_swd/NRF52_XIAO_SWD.ino.hex
+          test -s build_xiao_swd/XIAO_nRF52840_CMSIS_DAP.uf2
       - uses: actions/upload-artifact@v4
         with:
           name: XIAO-nRF52840-CMSIS-DAP-probe-build
