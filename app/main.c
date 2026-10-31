@@ -32,6 +32,11 @@ int main(void)
 
 	reg_init();
 
+	// Install global BANK0 GPIO IRQ callback before individual GPIO IRQs.
+	// The pinned Pico SDK indexes GPIO registers even with events=0;
+	// GPIO 0xFF used previously is not a valid RP2040 pin.
+	gpio_set_irq_enabled_with_callback(PIN_INT, 0, true, &gpio_irq);
+
 	backlight_init();
 
 	gpioexp_init();
@@ -43,9 +48,6 @@ int main(void)
 	interrupt_init();
 
 	puppet_i2c_init();
-
-	// For now, the `gpio` param is ignored and all enabled GPIOs generate the irq
-	gpio_set_irq_enabled_with_callback(0xFF, 0, true, &gpio_irq);
 
 #ifndef NDEBUG
 	printf("Starting main loop\r\n");

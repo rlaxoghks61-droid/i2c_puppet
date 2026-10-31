@@ -1,4 +1,5 @@
 #include "interrupt.h"
+#include "esp_i2c.h"
 
 #include "app_config.h"
 #include "gpioexp.h"
@@ -7,6 +8,15 @@
 #include "touchpad.h"
 
 #include <pico/stdlib.h>
+
+// Restore the queue-level INT state after each legacy pulse; the event queue
+// must keep INT LOW while unread 0x70 packets remain.
+static void legacy_int_pulse(void)
+{
+	gpio_put(PIN_INT, 0);
+	busy_wait_ms(reg_get_value(REG_ID_IND));
+	esp_i2c_sync_interrupt_pin();
+}
 
 static void key_cb(char key, enum key_state state)
 {
@@ -18,9 +28,7 @@ static void key_cb(char key, enum key_state state)
 
 	reg_set_bit(REG_ID_INT, INT_KEY);
 
-	gpio_put(PIN_INT, 0);
-	busy_wait_ms(reg_get_value(REG_ID_IND));
-	gpio_put(PIN_INT, 1);
+	legacy_int_pulse();
 }
 static struct key_callback key_callback = { .func = key_cb };
 
@@ -39,9 +47,7 @@ static void key_lock_cb(bool caps_changed, bool num_changed)
 	}
 
 	if (do_int) {
-		gpio_put(PIN_INT, 0);
-		busy_wait_ms(reg_get_value(REG_ID_IND));
-		gpio_put(PIN_INT, 1);
+		legacy_int_pulse();
 	}
 }
 static struct key_lock_callback key_lock_callback = { .func = key_lock_cb };
@@ -56,9 +62,7 @@ static void touch_cb(int8_t x, int8_t y)
 
 	reg_set_bit(REG_ID_INT, INT_TOUCH);
 
-	gpio_put(PIN_INT, 0);
-	busy_wait_ms(reg_get_value(REG_ID_IND));
-	gpio_put(PIN_INT, 1);
+	legacy_int_pulse();
 }
 static struct touch_callback touch_callback = { .func = touch_cb };
 
@@ -72,9 +76,7 @@ static void gpioexp_cb(uint8_t gpio, uint8_t gpio_idx)
 	reg_set_bit(REG_ID_INT, INT_GPIO);
 	reg_set_bit(REG_ID_GIN, (1 << gpio_idx));
 
-	gpio_put(PIN_INT, 0);
-	busy_wait_ms(reg_get_value(REG_ID_IND));
-	gpio_put(PIN_INT, 1);
+	legacy_int_pulse();
 }
 static struct gpioexp_callback gpioexp_callback = { .func = gpioexp_cb };
 

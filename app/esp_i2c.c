@@ -26,6 +26,12 @@ static void update_int_pin(void)
 		gpio_put(ESP_INT_PIN, 0);  // event waiting
 }
 
+// Safe to call from the legacy INT callback after an old-style pulse.
+void esp_i2c_sync_interrupt_pin(void)
+{
+	update_int_pin();
+}
+
 void esp_i2c_init(void)
 {
 	gpio_init(ESP_INT_PIN);
