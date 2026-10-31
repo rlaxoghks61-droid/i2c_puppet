@@ -78,7 +78,7 @@ static void irq_handler(void)
     if (status & I2C_IC_INTR_MASK_M_RX_FULL_BITS)
     {
         while (i2c_get_read_available(self.i2c))
-            receive_byte(i2c_read_byte_raw(self.i2c));
+            receive_byte((uint8_t)(self.i2c->hw->data_cmd & 0xff));
     }
 
     if (status & I2C_IC_INTR_MASK_M_RD_REQ_BITS)
@@ -89,12 +89,12 @@ static void irq_handler(void)
         if (n == 0)
         {
             if (i2c_get_write_available(self.i2c))
-                i2c_write_byte_raw(self.i2c, 0);
+                self.i2c->hw->data_cmd = 0;
         }
         else
         {
             for (uint8_t i = 0; i < n && i2c_get_write_available(self.i2c); ++i)
-                i2c_write_byte_raw(self.i2c, self.write_buffer[i]);
+                self.i2c->hw->data_cmd = self.write_buffer[i];
         }
 
         // Match the Pico SDK ordering: service RD_REQ, THEN clear it.
