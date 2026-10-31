@@ -1,0 +1,28 @@
+name: Build XIAO nRF52840 SWD probe
+
+on:
+  push:
+    paths:
+      - 'NRF52_XIAO_SWD/**'
+      - '.github/workflows/build-xiao-swd.yml'
+  workflow_dispatch:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install Seeed nRF52 Arduino core
+        run: |
+          arduino-cli core update-index --additional-urls "https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json"
+          arduino-cli core install Seeeduino:nrf52 --additional-urls "https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json"
+      - name: Install Adafruit nrfutil for Seeed core packaging
+        run: pipx install adafruit-nrfutil
+      - name: Compile Seeed XIAO nRF52840 CMSIS-DAP
+        run: |
+          arduino-cli compile --fqbn Seeeduino:nrf52:xiaonRF52840 --output-dir build_xiao_swd NRF52_XIAO_SWD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XIAO-nRF52840-CMSIS-DAP-probe-build
+          path: build_xiao_swd/**
