@@ -4,6 +4,7 @@
 
 #include "backlight.h"
 #include "debug.h"
+#include "esp_i2c.h"
 #include "gpioexp.h"
 #include "interrupt.h"
 #include "keyboard.h"
@@ -41,6 +42,9 @@ int main(void)
 	touchpad_init();
 
 	interrupt_init();
+
+	// Initialise custom 4-byte HID event queue / shared INT output.
+	esp_i2c_init();
 
 	puppet_i2c_init();
 
