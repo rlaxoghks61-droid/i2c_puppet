@@ -159,7 +159,17 @@ static uint8_t const cmsis_dap_descriptor[] = {
   0x15,0x00,0x26,0xFF,0x00,0x75,0x08,0x95,0x40,
   0x09,0x01,0x81,0x02,0x95,0x40,0x09,0x01,0x91,0x02,0xC0
 };
+// Two independent USB HID interfaces: CMSIS-DAP (vendor HID) + input HID.
 Adafruit_USBD_HID cmsis_hid;
+
+enum { USB_RID_KEYBOARD = 1, USB_RID_MOUSE = 2, USB_RID_CONSUMER = 3 };
+static uint8_t const usb_input_descriptor[] = {
+  TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(USB_RID_KEYBOARD)),
+  TUD_HID_REPORT_DESC_MOUSE(HID_REPORT_ID(USB_RID_MOUSE)),
+  TUD_HID_REPORT_DESC_CONSUMER(HID_REPORT_ID(USB_RID_CONSUMER))
+};
+Adafruit_USBD_HID usb_input_hid;
+
 static uint8_t req_buf[64];
 static uint8_t resp_buf[64];
 static volatile bool req_pending=false;
@@ -177,13 +187,18 @@ static void dapReceive(uint8_t report_id, hid_report_type_t report_type,
 
 static void startCMSIS() {
   TinyUSBDevice.setManufacturerDescriptor("Open CMSIS-DAP");
-  TinyUSBDevice.setProductDescriptor("BBQ20 BLE + CMSIS-DAP");
+  TinyUSBDevice.setProductDescriptor("BBQ20 USB + BLE HID + DAP");
   cmsis_hid.setReportDescriptor(cmsis_dap_descriptor,sizeof(cmsis_dap_descriptor));
   cmsis_hid.setStringDescriptor("CMSIS-DAP");
   cmsis_hid.setPollInterval(1);
   cmsis_hid.enableOutEndpoint(true);
   cmsis_hid.setReportCallback(nullptr,dapReceive);
   cmsis_hid.begin();
+
+  usb_input_hid.setReportDescriptor(usb_input_descriptor, sizeof(usb_input_descriptor));
+  usb_input_hid.setStringDescriptor("BBQ20 Keyboard Mouse Consumer");
+  usb_input_hid.setPollInterval(2);
+  usb_input_hid.begin();
   dap_init();
   if(TinyUSBDevice.mounted()) {
     TinyUSBDevice.detach();
@@ -214,6 +229,32 @@ static void serviceCMSIS() {
 
 BLEDis bledis;
 BLEHidAdafruit blehid;
+
+// Bluetooth remains preferred when connected. Disconnect Bluetooth to use
+// the USB keyboard/mouse on the PC to which nice!nano USB is attached.
+// The CMSIS-DAP interface remains independent of both HID output paths.
+static bool useUsbInput() {
+  return !Bluefruit.connected() && TinyUSBDevice.mounted() && usb_input_hid.isValid();
+}
+static bool inputAvailable() {
+  return Bluefruit.connected() || useUsbInput();
+}
+static bool sendKeyboardToHost(uint8_t mod, uint8_t key[6]) {
+  if (Bluefruit.connected()) return blehid.keyboardReport(mod, key);
+  return useUsbInput() && usb_input_hid.ready() &&
+         usb_input_hid.keyboardReport(USB_RID_KEYBOARD, mod, key);
+}
+static bool sendMouseToHost(uint8_t buttons, int8_t dx, int8_t dy) {
+  if (Bluefruit.connected()) return blehid.mouseReport(buttons,dx,dy,0,0);
+  return useUsbInput() && usb_input_hid.ready() &&
+         usb_input_hid.mouseReport(USB_RID_MOUSE,buttons,dx,dy,0,0);
+}
+static bool sendConsumerToHost(uint16_t usage) {
+  if (Bluefruit.connected()) return blehid.consumerReport(usage);
+  return useUsbInput() && usb_input_hid.ready() &&
+         usb_input_hid.sendReport16(USB_RID_CONSUMER,usage);
+}
+
 
 volatile bool irqPending = true; // polling also works without attachInterrupt
 
@@ -511,6 +552,9 @@ void printDiagnostics() {
   if(millis()-lastDiag<DIAG_INTERVAL_MS) return;
   lastDiag=millis();
   Serial.print("BLE=");Serial.print(Bluefruit.connected()?1:0);
+  Serial.print(" USB=");Serial.print(TinyUSBDevice.mounted()?1:0);
+  Serial.print(" USB_HID=");Serial.print(usb_input_hid.isValid()?1:0);
+  Serial.print(" OUT=");Serial.print(Bluefruit.connected()?"BLE":(useUsbInput()?"USB":"NONE"));
   Serial.print(" SWD=");Serial.print(swdActive?1:0);
   Serial.print(" REG70_OK=");Serial.print(reg70Ok);
   Serial.print(" REG70_FAIL=");Serial.print(reg70Fail);
@@ -555,7 +599,7 @@ void setup() {
 
   startAdv();
 
-  Serial.println("BLE HID + USB CMSIS-DAP initialized");
+  Serial.println("BLE HID + USB Keyboard/Mouse/Consumer + USB CMSIS-DAP initialized");
   Serial.println("Full keyboard state FIFO 32 (ESP32-style), 0.9x mouse, shorts navigation guard 350ms");
   Serial.println("MOUSE: 0.9x; shorts navigation no backlog + 350ms guard, no BLE backlog; send v for packet logs");
   Serial.println("I2C SDA=P0.04 SCL=P1.15 INT=P1.13; SWDIO=P1.14 SWCLK=P1.12");
@@ -574,7 +618,7 @@ void loop() {
     if (c == 'v' || c == 'V') { verbosePackets = !verbosePackets; Serial.print("PACKET_LOG="); Serial.println(verbosePackets?1:0); }
   }
 
-  if (!Bluefruit.connected()) {
+  if (!inputAvailable()) {
     keyboardDirty = true;
     mouseDirty = true;
     consumerDirty = true;
@@ -599,7 +643,7 @@ void loop() {
 
   // Emit independent BLE reports for arrow press and release.
   if (navPulsePressed) {
-    if (blehid.keyboardReport(effectiveMods(), keys)) {
+    if (sendKeyboardToHost(effectiveMods(), keys)) {
       navPulsePressed = false;
       navTail = (uint8_t)((navTail + 1) % NAV_Q_SIZE);
       navPulsesSent++;
@@ -610,7 +654,7 @@ void loop() {
   }
   if (navTail != navHead) {
     uint8_t navKeys[6] = { navQueue[navTail], 0, 0, 0, 0, 0 };
-    if (blehid.keyboardReport(effectiveMods(), navKeys)) {
+    if (sendKeyboardToHost(effectiveMods(), navKeys)) {
       navPulsePressed = true;
       lastTx = now;
     }
@@ -621,7 +665,7 @@ void loop() {
     uint8_t languageKeys[6] = {0x2C,0,0,0,0,0};
 
     if ((int32_t)(now - languageReleaseAt) < 0) {
-      if (blehid.keyboardReport(0x02, languageKeys)) {
+      if (sendKeyboardToHost(0x02, languageKeys)) {
         lastTx = now;
       }
       return;
@@ -633,7 +677,7 @@ void loop() {
 
   if (keyFrameCount) {
     KeyFrame &frame=keyFrames[keyFrameHead];
-    if (blehid.keyboardReport(frame.mod, frame.key)) {
+    if (sendKeyboardToHost(frame.mod, frame.key)) {
       keyFrameHead=(uint8_t)((keyFrameHead+1)%KEY_FRAME_CAP);
       keyFrameCount--;
       keyFramesSent++;
@@ -644,7 +688,7 @@ void loop() {
     return;
   }
   if (keyboardResyncNeeded || keyboardDirty) {
-    if (blehid.keyboardReport(effectiveMods(), keys)) {
+    if (sendKeyboardToHost(effectiveMods(), keys)) {
       keyboardResyncNeeded=false;
       keyboardDirty=false;
       lastTx=now;
@@ -653,7 +697,7 @@ void loop() {
   }
 
   if (consumerDirty) {
-    if (blehid.consumerReport(consumerUsage)) {
+    if (sendConsumerToHost(consumerUsage)) {
       consumerDirty = false;
       lastTx = now;
     }
@@ -669,9 +713,7 @@ void loop() {
       pendingY, -127, 127
     );
 
-    if (blehid.mouseReport(
-      mouseButtons, dx, dy, 0, 0
-    )) {
+    if (sendMouseToHost(mouseButtons, dx, dy)) {
       pendingX -= dx;
       pendingY -= dy;
 
