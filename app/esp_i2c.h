@@ -9,6 +9,7 @@
 #define ESP_EVT_CONSUMER 3
 
 void esp_i2c_init(void);
+void esp_i2c_sync_interrupt_pin(void);
 
 void esp_i2c_push_hid(uint8_t modifier, uint8_t keycode, uint8_t state);
 void esp_i2c_push_mouse(int8_t x, int8_t y, uint8_t buttons);
