@@ -250,15 +250,29 @@ uint8_t navHead = 0, navTail = 0;
 bool navPulsePressed = false;
 uint32_t navPulsesSent = 0;
 uint32_t navQueueOverflow = 0;
+uint32_t navSuppressed = 0;
+static constexpr uint32_t NAV_COOLDOWN_MS = 500;
+uint32_t lastNavAcceptedMs = 0;
+bool navAcceptedOnce = false;
 
 static bool isArrowKey(uint8_t key) {
   return key >= 0x4F && key <= 0x52; // Right, Left, Down, Up
 }
 static void queueNavKey(uint8_t key) {
+  const uint32_t now = millis();
+  // No backlog: a long touch must not become a burst of queued arrows.
+  // The RP2040 has its own 350ms gesture cooldown; add 500ms host-side guard.
+  if ((navAcceptedOnce && (uint32_t)(now - lastNavAcceptedMs) < NAV_COOLDOWN_MS) ||
+      navPulsePressed || navHead != navTail) {
+    navSuppressed++;
+    return;
+  }
   const uint8_t next = (uint8_t)((navHead + 1) % NAV_Q_SIZE);
   if (next == navTail) { navQueueOverflow++; return; }
   navQueue[navHead] = key;
   navHead = next;
+  lastNavAcceptedMs = now;
+  navAcceptedOnce = true;
 }
 
 
@@ -471,6 +485,7 @@ void printDiagnostics() {
   Serial.print(" NAV_SENT=");Serial.print(navPulsesSent);
   Serial.print(" NAV_Q=");Serial.print((navHead+NAV_Q_SIZE-navTail)%NAV_Q_SIZE);
   Serial.print(" NAV_OVF=");Serial.print(navQueueOverflow);
+  Serial.print(" NAV_DROP=");Serial.print(navSuppressed);
   Serial.print(" TWIM_OK=");Serial.print(twimOkay);
   Serial.print(" TWIM_TIMEOUT=");Serial.print(twimTimeouts);
   Serial.print(" SDA=");Serial.print(pinHigh(BBQ_PHYS_SDA));
@@ -505,7 +520,7 @@ void setup() {
   startAdv();
 
   Serial.println("BLE HID + USB CMSIS-DAP initialized");
-  Serial.println("FAST_MOUSE: 1.0x motion, 8ms TX, packet logging off (send v to toggle)");
+  Serial.println("MOUSE: 1.0x; shorts navigation one-step guard 500ms, no BLE backlog; send v for packet logs");
   Serial.println("I2C SDA=P0.04 SCL=P1.15 INT=P1.13; SWDIO=P1.14 SWCLK=P1.12");
 }
 
