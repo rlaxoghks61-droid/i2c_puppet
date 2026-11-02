@@ -1,4 +1,5 @@
 #include "interrupt.h"
+#include "esp_i2c.h"
 
 #include "app_config.h"
 #include "gpioexp.h"
@@ -20,7 +21,7 @@ static void key_cb(char key, enum key_state state)
 
 	gpio_put(PIN_INT, 0);
 	busy_wait_ms(reg_get_value(REG_ID_IND));
-	gpio_put(PIN_INT, 1);
+	esp_i2c_sync_interrupt_pin();
 }
 static struct key_callback key_callback = { .func = key_cb };
 
@@ -41,7 +42,7 @@ static void key_lock_cb(bool caps_changed, bool num_changed)
 	if (do_int) {
 		gpio_put(PIN_INT, 0);
 		busy_wait_ms(reg_get_value(REG_ID_IND));
-		gpio_put(PIN_INT, 1);
+		esp_i2c_sync_interrupt_pin();
 	}
 }
 static struct key_lock_callback key_lock_callback = { .func = key_lock_cb };
@@ -58,7 +59,7 @@ static void touch_cb(int8_t x, int8_t y)
 
 	gpio_put(PIN_INT, 0);
 	busy_wait_ms(reg_get_value(REG_ID_IND));
-	gpio_put(PIN_INT, 1);
+	esp_i2c_sync_interrupt_pin();
 }
 static struct touch_callback touch_callback = { .func = touch_cb };
 
@@ -74,7 +75,7 @@ static void gpioexp_cb(uint8_t gpio, uint8_t gpio_idx)
 
 	gpio_put(PIN_INT, 0);
 	busy_wait_ms(reg_get_value(REG_ID_IND));
-	gpio_put(PIN_INT, 1);
+	esp_i2c_sync_interrupt_pin();
 }
 static struct gpioexp_callback gpioexp_callback = { .func = gpioexp_cb };
 
