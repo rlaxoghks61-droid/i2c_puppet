@@ -45,3 +45,7 @@ jobs:
           path: |
             build_combined/NICENANO_BLE_SWD.uf2
             build_combined/NICENANO_BLE_SWD.ino.hex
+            NICENANO_BLE_SWD/NICENANO_BLE_SWD.ino
+            NICENANO_BLE_SWD/dap.c
+            NICENANO_BLE_SWD/dap.h
+            NICENANO_BLE_SWD/dap_config.h
