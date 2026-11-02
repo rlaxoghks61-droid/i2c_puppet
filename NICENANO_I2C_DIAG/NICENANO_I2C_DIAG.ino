@@ -1,160 +1,181 @@
 /*
-  nice!nano v2 -> RP2040 (BBQ20KBD) firmware 1.1 I2C verification.
-  IMPORTANT: This firmware is a temporary I2C/keyboard-event diagnostic.
-  Proven wiring: D3 INT=P0.29, D4 SDA=P0.04, D5 SCL=P0.05.
-  Standard i2c_puppet on RP2040: 7-bit address 0x1F;
-    REG_VER=0x01 (1 byte), REG_KEY=0x04 (1 byte FIFO count),
-    REG_FIF=0x09 (2 bytes: state, ASCII key), custom HID REG_ESP_KEY_EVENT=0x70 (4 bytes).
-  No BLE or SWD on this diagnostic image.
-  USB Serial 115200; prints STATUS and KEY lines.
+  BBQ20KBD RP2040 / nice!nano v2 I2C Diagnostic V2.
+  Native nRF52840 TWIM0 EasyDMA with bounded wait, no Wire busy loops.
+  Confirmed physical GPIO mapping:
+      INT D3 = P0.29 (input/pullup)
+      SDA D4 = P0.04 (I2C open drain/pullup)
+      SCL D5 = P0.05 (I2C open drain/pullup)
+  RP2040 i2c_puppet firmware ("NRF52" branch): address 0x1F;
+  registers 0x01 VER, 0x04 KEY status, 0x09 stock FIFO,
+  0x70 4-byte custom HID event FIFO.
+  USB serial 115200. No BLE and no SWD programming in this image.
 */
 #include <Arduino.h>
-#include <Wire.h>
 #include <Adafruit_TinyUSB.h>
 #include <nrf.h>
 
-static const uint8_t I2C_ADDR = 0x1F;
-static const uint8_t SDA_GPIO = 4;
-static const uint8_t SCL_GPIO = 5;
-static const uint8_t INT_GPIO = 29;
-static const uint32_t STATUS_INTERVAL = 1000;
-static uint32_t lastStatus = 0, lastPoll = 0;
-static uint32_t addrOk = 0, addrFail = 0, verOk = 0, verFail = 0, keyOk = 0, keyFail = 0, fifoOk = 0, fifoFail = 0, eventOk=0, eventFail=0, eventCount=0;
-static uint8_t lastVer = 0, lastCount = 0;
-static int lastErr = 0;
+static const uint8_t SDA_GPIO = 4, SCL_GPIO = 5, INT_GPIO = 29;
+static const uint8_t I2C_ADDR = 0x1f;
+static const uint32_t I2C_TIMEOUT_US = 20000UL;
+static const uint32_t SCAN_MS = 1000UL;
+static const uint32_t EVENT_MS = 120UL;
 
-static void i2cPin(uint8_t pin) {
-  NRF_P0->PIN_CNF[pin] =
-    (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
-    (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
-    (GPIO_PIN_CNF_PULL_Pullup << GPIO_PIN_CNF_PULL_Pos) |
-    (GPIO_PIN_CNF_DRIVE_S0D1 << GPIO_PIN_CNF_DRIVE_Pos) |
-    (GPIO_PIN_CNF_SENSE_Disabled << GPIO_PIN_CNF_SENSE_Pos);
+static uint32_t readOK=0, readFail=0, evtCount=0, evtEmpty=0, timeouts=0, attempts=0;
+static uint32_t lastScan=0, lastEvent=0;
+static int lastError=0;
+static uint32_t lastErrsrc=0, lastEventBits=0;
+static uint8_t version=0, keyStat=0;
+static bool validVersion=false;
+
+static bool pinHigh(uint8_t p) { return (NRF_P0->IN & (1UL << p)) != 0; }
+
+static void configureI2CPin(uint8_t p) {
+  NRF_P0->PIN_CNF[p] =
+      (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
+      (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
+      (GPIO_PIN_CNF_PULL_Pullup << GPIO_PIN_CNF_PULL_Pos) |
+      (GPIO_PIN_CNF_DRIVE_S0D1 << GPIO_PIN_CNF_DRIVE_Pos) |
+      (GPIO_PIN_CNF_SENSE_Disabled << GPIO_PIN_CNF_SENSE_Pos);
 }
 
-static void setupI2C() {
-  Wire.begin();
-  Wire.setClock(100000);
-  NRF_TWIM0->ENABLE = (TWIM_ENABLE_ENABLE_Disabled << TWIM_ENABLE_ENABLE_Pos);
-  i2cPin(SDA_GPIO);
-  i2cPin(SCL_GPIO);
-  NRF_TWIM0->PSEL.SDA = SDA_GPIO;
+static void startTWIM() {
+  NRF_TWIM0->ENABLE=0;
+  configureI2CPin(SDA_GPIO);
+  configureI2CPin(SCL_GPIO);
+  NRF_TWIM0->PSEL.SDA = SDA_GPIO; 
   NRF_TWIM0->PSEL.SCL = SCL_GPIO;
+  NRF_TWIM0->FREQUENCY = TWIM_FREQUENCY_FREQUENCY_K100;
+  NRF_TWIM0->SHORTS = TWIM_SHORTS_LASTTX_STARTRX_Msk | TWIM_SHORTS_LASTRX_STOP_Msk;
   NRF_TWIM0->ENABLE = (TWIM_ENABLE_ENABLE_Enabled << TWIM_ENABLE_ENABLE_Pos);
-  NRF_P0->PIN_CNF[INT_GPIO] =
-    (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
-    (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
-    (GPIO_PIN_CNF_PULL_Pullup << GPIO_PIN_CNF_PULL_Pos);
 }
 
-static int irq() { return (NRF_P0->IN & (1UL << INT_GPIO)) ? 1 : 0; }
-static int sda() { return (NRF_P0->IN & (1UL << SDA_GPIO)) ? 1 : 0; }
-static int scl() { return (NRF_P0->IN & (1UL << SCL_GPIO)) ? 1 : 0; }
-
-static bool regRead(uint8_t reg, uint8_t *out, uint8_t n, int *err) {
-  Wire.beginTransmission(I2C_ADDR);
-  Wire.write(reg);
-  *err = Wire.endTransmission(false);
-  if (*err != 0) return false;
-  const uint8_t received = Wire.requestFrom((uint8_t)I2C_ADDR, n, (uint8_t)true);
-  if (received != n) {
-    *err = -1 - (int)received;
-    while (Wire.available()) Wire.read();
-    return false;
-  }
-  for (uint8_t i = 0; i < n; i++) out[i] = Wire.read();
-  *err = 0;
-  return true;
-}
-
-static void printByteHex(uint8_t x) {
+static void printHex(uint8_t x) {
   if (x < 16) Serial.print('0');
   Serial.print(x, HEX);
 }
-static void queryStatus() {
-  Wire.beginTransmission(I2C_ADDR);
-  lastErr = Wire.endTransmission(true);
-  if (lastErr == 0) addrOk++; else addrFail++;
 
-  uint8_t version = 0;
-  int regErr = 0;
-  if (regRead(0x01, &version, 1, &regErr)) { verOk++; lastVer=version; }
-  else { verFail++; if (lastErr == 0) lastErr=regErr; }
+// Diagnostic errors:
+// 0=success, 2=address NACK, 3=data NACK, 4=other ERROR,
+// -20=bus not idle, -21=transaction timed out, -22=short RX.
+static int readRegBounded(uint8_t reg, uint8_t *buf, uint8_t len) {
+  attempts++;
+  if (!pinHigh(SDA_GPIO) || !pinHigh(SCL_GPIO)) {
+    lastError = -20;
+    return -20;
+  }
+  NRF_TWIM_Type *t = NRF_TWIM0;
+  uint8_t txByte = reg; // EasyDMA buffer in RAM; valid until STOPPED.
+  t->EVENTS_STOPPED=0;
+  t->EVENTS_ERROR=0;
+  t->EVENTS_TXSTARTED=0;
+  t->EVENTS_RXSTARTED=0;
+  t->EVENTS_LASTTX=0;
+  t->EVENTS_LASTRX=0;
+  t->ERRORSRC=TWIM_ERRORSRC_ANACK_Msk | TWIM_ERRORSRC_DNACK_Msk | TWIM_ERRORSRC_OVERRUN_Msk;
+  t->ADDRESS=I2C_ADDR;
+  t->TXD.PTR=(uint32_t)&txByte;
+  t->TXD.MAXCNT=1;
+  t->RXD.PTR=(uint32_t)buf;
+  t->RXD.MAXCNT=len;
+  t->SHORTS = TWIM_SHORTS_LASTTX_STARTRX_Msk | TWIM_SHORTS_LASTRX_STOP_Msk;
+  t->TASKS_RESUME=1;
+  t->TASKS_STARTTX=1;
 
-  Serial.print("STATUS ACK="); Serial.print(lastErr == 0 ? 1 : 0); // will be updated by register error too
-  Serial.print(" ack_err="); Serial.print(lastErr);
-  Serial.print(" addr_ok="); Serial.print(addrOk);
-  Serial.print(" addr_fail="); Serial.print(addrFail);
-  Serial.print(" ver_ok="); Serial.print(verOk);
-  Serial.print(" ver_fail="); Serial.print(verFail);
-  Serial.print(" FW=0x"); printByteHex(lastVer);
-  Serial.print(" fifo_count="); Serial.print(lastCount);
-  Serial.print(" event_ok="); Serial.print(eventOk);
-  Serial.print(" event_fail="); Serial.print(eventFail);
-  Serial.print(" event_packets="); Serial.print(eventCount);
-  Serial.print(" INT="); Serial.print(irq());
-  Serial.print(" SDA="); Serial.print(sda());
-  Serial.print(" SCL="); Serial.println(scl());
+  bool errorStopIssued=false;
+  const uint32_t started=micros();
+  while (!t->EVENTS_STOPPED) {
+    if (t->EVENTS_ERROR && !errorStopIssued) {
+      t->TASKS_STOP=1;
+      errorStopIssued=true;
+    }
+    if ((uint32_t)(micros()-started) >= I2C_TIMEOUT_US) break;
+  }
+
+  lastEventBits=(t->EVENTS_TXSTARTED?1:0)|
+                (t->EVENTS_LASTTX?2:0)|
+                (t->EVENTS_RXSTARTED?4:0)|
+                (t->EVENTS_LASTRX?8:0)|
+                (t->EVENTS_ERROR?16:0)|
+                (t->EVENTS_STOPPED?32:0);
+  lastErrsrc=t->ERRORSRC;
+  const bool stopped=(t->EVENTS_STOPPED!=0);
+  const uint32_t amount=t->RXD.AMOUNT;
+  int status=0;
+  if (!stopped) status=-21;
+  else if (lastErrsrc & TWIM_ERRORSRC_ANACK_Msk) status=2;
+  else if (lastErrsrc & TWIM_ERRORSRC_DNACK_Msk) status=3;
+  else if (lastErrsrc) status=4;
+  else if (amount != len) status=-22;
+  if (status != 0) {
+    if (status==-21) {
+      timeouts++;
+      t->TASKS_STOP=1;
+      uint32_t startStop=micros();
+      while(!t->EVENTS_STOPPED && (uint32_t)(micros()-startStop)<2000UL) {}
+    }
+    startTWIM(); // Reset TWIM peripheral state before next probe.
+    readFail++;
+  } else readOK++;
+  lastError=status;
+  return status;
 }
 
-static void pollKeyboard() {
-  uint8_t countReg = 0;
-  int err = 0;
-  if (!regRead(0x04, &countReg, 1, &err)) {
-    keyFail++;
-    static uint32_t lastE = 0;
-    if (millis() - lastE > 2000) {
-      Serial.print("READ_KEY_FAIL err="); Serial.println(err);
-      lastE = millis();
-    }
-    return;
-  }
-  keyOk++;
-  uint8_t count = countReg & 0x1f;
-  lastCount=count;
-  if (count == 0) return;
-  if (count > 12) count = 12;
-  for (uint8_t i = 0; i < count; i++) {
-    uint8_t event[2] = {0,0};
-    if (!regRead(0x09, event, 2, &err)) {
-      fifoFail++;
-      Serial.print("FIFO_READ_FAIL err="); Serial.println(err);
-      return;
-    }
-    fifoOk++;
-    Serial.print("KEY STATE="); Serial.print(event[0]);
-    Serial.print(" CODE=0x"); printByteHex(event[1]);
-    Serial.print(" CHAR=");
-    if (event[1] >= 32 && event[1] < 127) Serial.write(event[1]);
-    else Serial.print("(nonprintable)");
-    Serial.println();
-  }
+static void printBus(const char *label) {
+  Serial.print(label);
+  Serial.print(" SDA=");Serial.print(pinHigh(SDA_GPIO));
+  Serial.print(" SCL=");Serial.print(pinHigh(SCL_GPIO));
+  Serial.print(" INT=");Serial.print(pinHigh(INT_GPIO));
+  Serial.print(" PSEL_SDA=");Serial.print(NRF_TWIM0->PSEL.SDA);
+  Serial.print(" PSEL_SCL=");Serial.println(NRF_TWIM0->PSEL.SCL);
 }
 
+static void probe() {
+  Serial.print("HEARTBEAT ms="); Serial.print(millis());
+  Serial.print(" tries="); Serial.print(attempts);
+  Serial.print(" ok="); Serial.print(readOK);
+  Serial.print(" fail="); Serial.print(readFail);
+  Serial.print(" timeout="); Serial.println(timeouts);
+  printBus("BEFORE_REG01");
+  uint8_t v=0;
+  int err=readRegBounded(0x01,&v,1);
+  Serial.print("REG01_VER result=");Serial.print(err);
+  Serial.print(" events=0x");Serial.print(lastEventBits,HEX);
+  Serial.print(" errorsrc=0x");Serial.print(lastErrsrc,HEX);
+  Serial.print(" byte=0x");printHex(v);
+  Serial.println();
+  if (err==0) {version=v;validVersion=true;}
+  else {validVersion=false;printBus("AFTER_FAIL");return;}
+  uint8_t count=0;
+  err=readRegBounded(0x04,&count,1);
+  Serial.print("REG04_KEY result="); Serial.print(err);
+  Serial.print(" byte=0x");printHex(count);
+  Serial.println();
+  if (err==0) keyStat=count;
+  printBus("AFTER_PROBE");
+}
 
-static void pollCustomHID() {
-  int err=0;
-  for (int i=0;i<12;i++) {
-    uint8_t evt[4]={0,0,0,0};
-    if (!regRead(0x70,evt,4,&err)) {
-      eventFail++;
-      static uint32_t lastError=0;
-      if (millis()-lastError>2000) {
-        Serial.print("READ_EVENT_70_FAIL err="); Serial.println(err);
-        lastError=millis();
-      }
+static void pollEvents() {
+  if (!validVersion) return;
+  for (uint8_t i=0;i<10;i++) {
+    uint8_t p[4]={0,0,0,0};
+    int err=readRegBounded(0x70,p,4);
+    if (err!=0) {
+      Serial.print("REG70_FAIL error=");Serial.print(err);
+      Serial.print(" events=0x");Serial.print(lastEventBits,HEX);
+      Serial.print(" errorsrc=0x");Serial.println(lastErrsrc,HEX);
+      validVersion=false;
       return;
     }
-    eventOk++;
-    if (!evt[0]) break; // empty queue; stop draining
-    eventCount++;
-    Serial.print("EVENT70 TYPE="); Serial.print(evt[0]);
-    Serial.print(" A=0x"); printByteHex(evt[1]);
-    Serial.print(" B=0x"); printByteHex(evt[2]);
-    Serial.print(" C=0x"); printByteHex(evt[3]);
-    if (evt[0] == 1) {
-      Serial.print(" KEY_HID=0x"); printByteHex(evt[2]);
-      Serial.print(" STATE="); Serial.print(evt[3]);
+    if (p[0]==0) {evtEmpty++;break;}
+    evtCount++;
+    Serial.print("EVENT70 #");Serial.print(evtCount);
+    Serial.print(" type=");Serial.print(p[0]);
+    Serial.print(" A=0x");printHex(p[1]);
+    Serial.print(" B=0x");printHex(p[2]);
+    Serial.print(" C=0x");printHex(p[3]);
+    if (p[0]==1) {
+      Serial.print(" HID_KEY=0x");printHex(p[2]);
+      Serial.print(" STATE=");Serial.print(p[3]);
     }
     Serial.println();
   }
@@ -162,27 +183,30 @@ static void pollCustomHID() {
 
 void setup() {
   Serial.begin(115200);
-  unsigned long start = millis();
-  while (!Serial && millis() - start < 3500) delay(10);
-  Serial.println("\nBBQ20KBD I2C_PUPPET 0x1F v1.1 DIAGNOSTIC");
-  Serial.println("INT=D3(P0.29) SDA=D4(P0.04) SCL=D5(P0.05)");
-  Serial.println("REG_VER=01 REG_KEY=04 REG_FIFO=09(2 bytes) ESP_HID=70(4 bytes)");
-  setupI2C();
-  Serial.print("TWIM0 PSEL SDA="); Serial.print(NRF_TWIM0->PSEL.SDA);
-  Serial.print(" SCL="); Serial.println(NRF_TWIM0->PSEL.SCL);
-  Serial.println("READY");
+  uint32_t t0=millis();
+  while(!Serial && (uint32_t)(millis()-t0) < 3500UL) delay(10);
+  Serial.println();
+  Serial.println("BBQ20KBD I2C_DIAG_V2 NATIVE_TWIM_BOUNDED");
+  Serial.println("GPIO INT=P0.29 SDA=P0.04 SCL=P0.05, ADDR=0x1F");
+  NRF_P0->PIN_CNF[INT_GPIO] =
+    (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
+    (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
+    (GPIO_PIN_CNF_PULL_Pullup << GPIO_PIN_CNF_PULL_Pos);
+  startTWIM();
+  printBus("START");
+  Serial.println("READY_V2");
+  Serial.flush();
 }
 
 void loop() {
-  const uint32_t now = millis();
-  if (now - lastPoll >= 30) {
-    lastPoll=now;
-    pollKeyboard();
-    pollCustomHID();
+  uint32_t now=millis();
+  if ((uint32_t)(now-lastScan)>=SCAN_MS) {
+    lastScan=now;
+    probe();
   }
-  if (now - lastStatus >= STATUS_INTERVAL) {
-    lastStatus=now;
-    queryStatus();
+  if ((uint32_t)(now-lastEvent)>=EVENT_MS) {
+    lastEvent=now;
+    pollEvents();
   }
   delay(1);
 }
