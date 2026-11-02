@@ -3,9 +3,9 @@
  * BBQ20KBD custom firmware -> nRF52840 BLE HID Bridge
  *
  * Board: nice!nano v2 / nRF52840 compatible
- * SDA: physical D4 / P0.04
- * SCL: physical D5 / P0.05
- * INT: physical D3 / P0.29
+ * SDA: physical D3 / P0.29
+ * SCL: physical D10 / P1.15
+ * INT: physical D8 / P1.13
  * I2C address: 0x1F
  * Event register: 0x70
  *
@@ -29,16 +29,15 @@ extern "C" {
 #define TX_INTERVAL_MS 16
 #define DIAG_INTERVAL_MS 1000
 
-// GPIO numbers below are the MCU's physical P0.xx numbers, NOT Arduino D indexes.
-// The installed nice!nano v2 variant has no Arduino entries for P0.04/P0.05.
-// Its Wire library uses NRF_TWIM0 and normally maps Arduino indexes through
-// g_ADigitalPinMap, so selecting Wire.setPins(4, 5) would be INCORRECT here.
-static constexpr uint8_t BBQ_PHYS_SDA = 4;   // Board D4 -> P0.04
-static constexpr uint8_t BBQ_PHYS_SCL = 5;   // Board D5 -> P0.05
-static constexpr uint8_t BBQ_PHYS_INT = 29;  // Board D3 -> P0.29
+// User-confirmed actual GPIO mapping: SDA=P0.29, SCL=P1.15, INT=P1.13.
+// Nordic TWIM PSEL needs port bit 5 for P1.xx pins (0x20 | pin).
+static constexpr uint8_t BBQ_PHYS_SDA = 29;
+static constexpr uint8_t BBQ_PHYS_SCL = 15;
+static constexpr uint8_t BBQ_PHYS_INT = 13;
+static constexpr uint32_t BBQ_SCL_PSEL = 0x20UL | BBQ_PHYS_SCL;
 
 static void configurePhysicalInputPullup(uint8_t physicalPin) {
-  NRF_P0->PIN_CNF[physicalPin] =
+  NRF_P1->PIN_CNF[physicalPin] =
       (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
       (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
       (GPIO_PIN_CNF_PULL_Pullup << GPIO_PIN_CNF_PULL_Pos) |
@@ -47,7 +46,6 @@ static void configurePhysicalInputPullup(uint8_t physicalPin) {
 }
 
 static void configurePhysicalI2CPin(uint8_t physicalPin) {
-  // Match the open-drain / pull-up configuration of Adafruit Wire_nRF52.cpp.
   NRF_P0->PIN_CNF[physicalPin] =
       (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
       (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
@@ -56,16 +54,15 @@ static void configurePhysicalI2CPin(uint8_t physicalPin) {
       (GPIO_PIN_CNF_SENSE_Disabled << GPIO_PIN_CNF_SENSE_Pos);
 }
 
-
 static const uint8_t SDA_GPIO=BBQ_PHYS_SDA, SCL_GPIO=BBQ_PHYS_SCL, INT_GPIO=BBQ_PHYS_INT;
 static const uint8_t I2C_ADDR=BBQ_ADDR;
 static const uint32_t I2C_TIMEOUT_US=20000UL;
 static volatile bool swdActive=false;
 static uint32_t twimErrors=0, twimTimeouts=0, twimOkay=0, twimIdleFails=0;
-static bool pinHigh(uint8_t p) { return (NRF_P0->IN & (1UL << p)) != 0; }
+static bool pinHigh(uint8_t p) { return p==SCL_GPIO ? !!(NRF_P1->IN & (1UL << p)) : !!(NRF_P0->IN & (1UL << p)); }
 
 static void configureI2CPin(uint8_t p) {
-  NRF_P0->PIN_CNF[p] =
+  (p==SCL_GPIO ? NRF_P1 : NRF_P0)->PIN_CNF[p] =
       (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
       (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
       (GPIO_PIN_CNF_PULL_Pullup << GPIO_PIN_CNF_PULL_Pos) |
@@ -78,7 +75,7 @@ static void startTWIM() {
   configureI2CPin(SDA_GPIO);
   configureI2CPin(SCL_GPIO);
   NRF_TWIM0->PSEL.SDA = SDA_GPIO; 
-  NRF_TWIM0->PSEL.SCL = SCL_GPIO;
+  NRF_TWIM0->PSEL.SCL = BBQ_SCL_PSEL;
   NRF_TWIM0->FREQUENCY = TWIM_FREQUENCY_FREQUENCY_K100;
   NRF_TWIM0->SHORTS = TWIM_SHORTS_LASTTX_STARTRX_Msk | TWIM_SHORTS_LASTRX_STOP_Msk;
   NRF_TWIM0->ENABLE = (TWIM_ENABLE_ENABLE_Enabled << TWIM_ENABLE_ENABLE_Pos);
@@ -151,7 +148,7 @@ static void beginBBQI2C() {
 }
 
 static uint8_t readBBQINT() {
-  return (NRF_P0->IN & (1UL << BBQ_PHYS_INT)) ? HIGH : LOW;
+  return (NRF_P1->IN & (1UL << BBQ_PHYS_INT)) ? HIGH : LOW;
 }
 
 
@@ -457,8 +454,8 @@ void setup() {
 
   beginBBQI2C();
   Serial.print("Physical GPIO SDA=P0."); Serial.print(BBQ_PHYS_SDA);
-  Serial.print(" SCL=P0."); Serial.print(BBQ_PHYS_SCL);
-  Serial.print(" INT=P0."); Serial.println(BBQ_PHYS_INT);
+  Serial.print(" SCL=P1."); Serial.print(BBQ_PHYS_SCL);
+  Serial.print(" INT=P1."); Serial.println(BBQ_PHYS_INT);
   Serial.print("TWIM0 PSEL SDA="); Serial.print(NRF_TWIM0->PSEL.SDA);
   Serial.print(" SCL="); Serial.println(NRF_TWIM0->PSEL.SCL);
 
@@ -477,7 +474,7 @@ void setup() {
   startAdv();
 
   Serial.println("BLE HID + USB CMSIS-DAP initialized");
-  Serial.println("I2C SDA=P0.04 SCL=P0.05 INT=P0.29; SWDIO=P1.13 SWCLK=P1.14");
+  Serial.println("I2C SDA=P0.29 SCL=P1.15 INT=P1.13; SWDIO=P1.14 SWCLK=P1.12");
 }
 
 void loop() {
