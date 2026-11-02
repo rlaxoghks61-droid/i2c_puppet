@@ -251,7 +251,7 @@ bool navPulsePressed = false;
 uint32_t navPulsesSent = 0;
 uint32_t navQueueOverflow = 0;
 uint32_t navSuppressed = 0;
-static constexpr uint32_t NAV_COOLDOWN_MS = 500;
+static constexpr uint32_t NAV_COOLDOWN_MS = 350;
 uint32_t lastNavAcceptedMs = 0;
 bool navAcceptedOnce = false;
 
@@ -261,7 +261,7 @@ static bool isArrowKey(uint8_t key) {
 static void queueNavKey(uint8_t key) {
   const uint32_t now = millis();
   // No backlog: a long touch must not become a burst of queued arrows.
-  // The RP2040 has its own 350ms gesture cooldown; add 500ms host-side guard.
+  // The RP2040 has its own 350ms gesture cooldown; match the 350ms minimum.
   if ((navAcceptedOnce && (uint32_t)(now - lastNavAcceptedMs) < NAV_COOLDOWN_MS) ||
       navPulsePressed || navHead != navTail) {
     navSuppressed++;
@@ -353,10 +353,9 @@ void updateKey(uint8_t mod, uint8_t key, uint8_t state) {
 }
 
 int8_t scaledAxis(int8_t raw, int16_t &rem) {
-  int16_t v = int16_t(raw); // 1.0x raw touchpad motion
-  int16_t out = v;
-
-  rem = 0;
+  int16_t v = int16_t(raw) * 9 + rem; // 0.9x raw touchpad motion
+  int16_t out = v / 10;
+  rem = v - out * 10;
 
   return (int8_t)constrain(out, -127, 127);
 }
@@ -520,7 +519,7 @@ void setup() {
   startAdv();
 
   Serial.println("BLE HID + USB CMSIS-DAP initialized");
-  Serial.println("MOUSE: 1.0x; shorts navigation one-step guard 500ms, no BLE backlog; send v for packet logs");
+  Serial.println("MOUSE: 0.9x; shorts navigation no backlog + 350ms guard, no BLE backlog; send v for packet logs");
   Serial.println("I2C SDA=P0.04 SCL=P1.15 INT=P1.13; SWDIO=P1.14 SWCLK=P1.12");
 }
 
