@@ -303,6 +303,21 @@ enum OutputRoute : uint8_t { ROUTE_NONE=0, ROUTE_BLE=1, ROUTE_USB=2 };
 OutputRoute activeRoute=ROUTE_NONE;
 bool releaseOldBleKeyboard=false, releaseOldBleMouse=false, releaseOldBleConsumer=false;
 
+
+
+// RP2040 sends navigation arrow press and release back-to-back.
+// Queue each stroke so the BLE host receives distinct HID reports.
+static constexpr uint8_t NAV_Q_SIZE = 16;
+uint8_t navQueue[NAV_Q_SIZE] = {0};
+uint8_t navHead = 0, navTail = 0;
+bool navPulsePressed = false;
+uint32_t navPulsesSent = 0;
+uint32_t navQueueOverflow = 0;
+uint32_t navSuppressed = 0;
+static constexpr uint32_t NAV_COOLDOWN_MS = 350;
+uint32_t lastNavAcceptedMs = 0;
+bool navAcceptedOnce = false;
+
 static void updateOutputRoute() {
   const OutputRoute next = useUsbInput() ? ROUTE_USB :
                            (Bluefruit.connected() ? ROUTE_BLE : ROUTE_NONE);
@@ -338,25 +353,12 @@ static void releaseBleHostOnUsbSwitch() {
     uint8_t emptyKeys[6]={0};
     if (blehid.keyboardReport(0,emptyKeys)) releaseOldBleKeyboard=false;
   } else if (releaseOldBleMouse) {
-    if (blehid.mouseReport(0,0,0,0,0)) releaseOldBleMouse=false;
+    if (blehid.mouseReport(uint8_t(0),int8_t(0),int8_t(0),int8_t(0),int8_t(0))) releaseOldBleMouse=false;
   } else if (releaseOldBleConsumer) {
     if (blehid.consumerReport(0)) releaseOldBleConsumer=false;
   }
 }
 
-
-// RP2040 sends navigation arrow press and release back-to-back.
-// Queue each stroke so the BLE host receives distinct HID reports.
-static constexpr uint8_t NAV_Q_SIZE = 16;
-uint8_t navQueue[NAV_Q_SIZE] = {0};
-uint8_t navHead = 0, navTail = 0;
-bool navPulsePressed = false;
-uint32_t navPulsesSent = 0;
-uint32_t navQueueOverflow = 0;
-uint32_t navSuppressed = 0;
-static constexpr uint32_t NAV_COOLDOWN_MS = 350;
-uint32_t lastNavAcceptedMs = 0;
-bool navAcceptedOnce = false;
 
 static bool isArrowKey(uint8_t key) {
   return key >= 0x4F && key <= 0x52; // Right, Left, Down, Up
