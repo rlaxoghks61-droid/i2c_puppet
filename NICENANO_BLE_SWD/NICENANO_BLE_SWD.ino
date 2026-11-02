@@ -26,8 +26,8 @@ extern "C" {
 
 
 #define I2C_HZ 100000
-#define TX_INTERVAL_MS 8
-#define IDLE_I2C_POLL_MS 12
+#define TX_INTERVAL_MS 4
+#define IDLE_I2C_POLL_MS 4
 #define DIAG_INTERVAL_MS 1000
 
 // User-confirmed actual GPIO mapping: SDA=P0.04, SCL=P1.15, INT=P1.13.
@@ -515,11 +515,13 @@ void setup() {
   bledis.begin();
 
   blehid.begin();
+  // Adafruit recommends 9-12 units (11.25-15ms) for BLE HID; host negotiates the actual interval.
+  Bluefruit.Periph.setConnInterval(9, 12);
 
   startAdv();
 
   Serial.println("BLE HID + USB CMSIS-DAP initialized");
-  Serial.println("MOUSE: 0.9x; shorts navigation no backlog + 350ms guard, no BLE backlog; send v for packet logs");
+  Serial.println("MOUSE: 0.9x; shorts navigation no backlog + 350ms guard, 4ms host scheduling, no BLE backlog; send v for packet logs");
   Serial.println("I2C SDA=P0.04 SCL=P1.15 INT=P1.13; SWDIO=P1.14 SWCLK=P1.12");
 }
 
