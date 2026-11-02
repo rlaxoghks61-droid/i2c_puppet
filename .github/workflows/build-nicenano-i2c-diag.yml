@@ -1,0 +1,45 @@
+name: Build nice nano BBQ20 I2C diagnostic UF2
+on:
+  push:
+    paths:
+      - 'NICENANO_I2C_DIAG/**'
+      - '.github/workflows/build-nicenano-i2c-diag.yml'
+  workflow_dispatch:
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install nice nano Arduino core
+        run: |
+          set -euo pipefail
+          IDX='https://raw.githubusercontent.com/rlaxoghks61-droid/i2c_puppet/NICENANO_V2_SWD_PROGRAMMER/NICENANO_V2_SWD/package_nRFMicro_fixed_index.json'
+          SEEED='https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json'
+          arduino-cli core update-index --additional-urls "$IDX,$SEEED"
+          arduino-cli core install Seeeduino:nrf52 --additional-urls "$IDX,$SEEED"
+          arduino-cli core install 'nRFMicro:nrf52@1.0.2' --additional-urls "$IDX,$SEEED"
+      - name: Compile
+        run: |
+          arduino-cli compile --fqbn 'nRFMicro:nrf52:nicenanov2:softdevice=s140v6' --build-property build.ldscript=nrf52840_s140_v6.ld --output-dir build_nicenano_i2c NICENANO_I2C_DIAG
+      - name: Convert and validate UF2
+        run: |
+          set -euo pipefail
+          CONVERTER=$(find ~/.arduino15/packages -path '*/tools/uf2conv/uf2conv.py' -print -quit)
+          test -n "$CONVERTER"
+          python3 "$CONVERTER" -c -f 0xADA52840 -o build_nicenano_i2c/NICENANO_I2C_DIAG.uf2 build_nicenano_i2c/NICENANO_I2C_DIAG.ino.hex
+          python3 - <<'PY'
+          import struct
+          s=open('build_nicenano_i2c/NICENANO_I2C_DIAG.uf2','rb').read()
+          assert len(s)>0 and len(s)%512==0
+          h=[struct.unpack_from('<8I',s,n) for n in range(0,len(s),512)]
+          assert min(x[3] for x in h)==0x26000
+          assert all(x[0]==0x0A324655 and x[1]==0x9E5D5157 and x[7]==0xADA52840 for x in h)
+          print('UF2 VERIFIED',len(h),'blocks')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NICENANO-KEYBOARD-I2C-DIAG-UF2
+          path: |
+            build_nicenano_i2c/NICENANO_I2C_DIAG.uf2
+            build_nicenano_i2c/NICENANO_I2C_DIAG.ino.hex
