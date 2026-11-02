@@ -230,29 +230,29 @@ static void serviceCMSIS() {
 BLEDis bledis;
 BLEHidAdafruit blehid;
 
-// Bluetooth remains preferred when connected. Disconnect Bluetooth to use
-// the USB keyboard/mouse on the PC to which nice!nano USB is attached.
-// The CMSIS-DAP interface remains independent of both HID output paths.
+// USB has priority whenever a USB host has enumerated this device.
+// BLE remains connected but does not receive keyboard/mouse/consumer events
+// while USB is active. CMSIS-DAP is independent.
 static bool useUsbInput() {
-  return !Bluefruit.connected() && TinyUSBDevice.mounted() && usb_input_hid.isValid();
+  return TinyUSBDevice.mounted() && usb_input_hid.isValid();
 }
 static bool inputAvailable() {
-  return Bluefruit.connected() || useUsbInput();
+  return useUsbInput() || Bluefruit.connected();
 }
 static bool sendKeyboardToHost(uint8_t mod, uint8_t key[6]) {
-  if (Bluefruit.connected()) return blehid.keyboardReport(mod, key);
-  return useUsbInput() && usb_input_hid.ready() &&
+  if (useUsbInput()) return usb_input_hid.ready() &&
          usb_input_hid.keyboardReport(USB_RID_KEYBOARD, mod, key);
+  return Bluefruit.connected() && blehid.keyboardReport(mod, key);
 }
 static bool sendMouseToHost(uint8_t buttons, int8_t dx, int8_t dy) {
-  if (Bluefruit.connected()) return blehid.mouseReport(buttons,dx,dy,0,0);
-  return useUsbInput() && usb_input_hid.ready() &&
+  if (useUsbInput()) return usb_input_hid.ready() &&
          usb_input_hid.mouseReport(USB_RID_MOUSE,buttons,dx,dy,0,0);
+  return Bluefruit.connected() && blehid.mouseReport(buttons,dx,dy,0,0);
 }
 static bool sendConsumerToHost(uint16_t usage) {
-  if (Bluefruit.connected()) return blehid.consumerReport(usage);
-  return useUsbInput() && usb_input_hid.ready() &&
+  if (useUsbInput()) return usb_input_hid.ready() &&
          usb_input_hid.sendReport16(USB_RID_CONSUMER,usage);
+  return Bluefruit.connected() && blehid.consumerReport(usage);
 }
 
 
@@ -296,6 +296,54 @@ uint32_t lastDiag = 0;
 uint32_t languageReleaseAt = 0;
 
 bool languageCombo = false;
+
+// On a USB/BLE handover, synchronize the active host with the actual state,
+// not a backlog of HID reports prepared for the old connection.
+enum OutputRoute : uint8_t { ROUTE_NONE=0, ROUTE_BLE=1, ROUTE_USB=2 };
+OutputRoute activeRoute=ROUTE_NONE;
+bool releaseOldBleKeyboard=false, releaseOldBleMouse=false, releaseOldBleConsumer=false;
+
+static void updateOutputRoute() {
+  const OutputRoute next = useUsbInput() ? ROUTE_USB :
+                           (Bluefruit.connected() ? ROUTE_BLE : ROUTE_NONE);
+  if (next==activeRoute) return;
+
+  if (activeRoute==ROUTE_BLE && next==ROUTE_USB && Bluefruit.connected()) {
+    releaseOldBleKeyboard=true;
+    releaseOldBleMouse=true;
+    releaseOldBleConsumer=true;
+  }
+  if (next!=ROUTE_USB) {
+    releaseOldBleKeyboard=false;
+    releaseOldBleMouse=false;
+    releaseOldBleConsumer=false;
+  }
+  activeRoute=next;
+  // Never replay old key taps, directional strokes or mouse motion on a new host.
+  keyFrameHead=keyFrameTail=keyFrameCount=0;
+  navTail=navHead;
+  navPulsePressed=false;
+  languageCombo=false;
+  pendingX=pendingY=0;
+  keyboardDirty=true;
+  keyboardResyncNeeded=true;
+  mouseDirty=true;
+  consumerDirty=true;
+  lastTx=0;
+}
+
+static void releaseBleHostOnUsbSwitch() {
+  if (!useUsbInput() || !Bluefruit.connected()) return;
+  if (releaseOldBleKeyboard) {
+    uint8_t emptyKeys[6]={0};
+    if (blehid.keyboardReport(0,emptyKeys)) releaseOldBleKeyboard=false;
+  } else if (releaseOldBleMouse) {
+    if (blehid.mouseReport(0,0,0,0,0)) releaseOldBleMouse=false;
+  } else if (releaseOldBleConsumer) {
+    if (blehid.consumerReport(0)) releaseOldBleConsumer=false;
+  }
+}
+
 
 // RP2040 sends navigation arrow press and release back-to-back.
 // Queue each stroke so the BLE host receives distinct HID reports.
@@ -554,7 +602,7 @@ void printDiagnostics() {
   Serial.print("BLE=");Serial.print(Bluefruit.connected()?1:0);
   Serial.print(" USB=");Serial.print(TinyUSBDevice.mounted()?1:0);
   Serial.print(" USB_HID=");Serial.print(usb_input_hid.isValid()?1:0);
-  Serial.print(" OUT=");Serial.print(Bluefruit.connected()?"BLE":(useUsbInput()?"USB":"NONE"));
+  Serial.print(" OUT=");Serial.print(useUsbInput()?"USB":(Bluefruit.connected()?"BLE":"NONE"));
   Serial.print(" SWD=");Serial.print(swdActive?1:0);
   Serial.print(" REG70_OK=");Serial.print(reg70Ok);
   Serial.print(" REG70_FAIL=");Serial.print(reg70Fail);
@@ -599,7 +647,7 @@ void setup() {
 
   startAdv();
 
-  Serial.println("BLE HID + USB Keyboard/Mouse/Consumer + USB CMSIS-DAP initialized");
+  Serial.println("USB-FIRST Keyboard/Mouse/Consumer + BLE fallback + USB CMSIS-DAP initialized");
   Serial.println("Full keyboard state FIFO 32 (ESP32-style), 0.9x mouse, shorts navigation guard 350ms");
   Serial.println("MOUSE: 0.9x; shorts navigation no backlog + 350ms guard, no BLE backlog; send v for packet logs");
   Serial.println("I2C SDA=P0.04 SCL=P1.15 INT=P1.13; SWDIO=P1.14 SWCLK=P1.12");
@@ -607,6 +655,8 @@ void setup() {
 
 void loop() {
   serviceCMSIS();
+  updateOutputRoute();
+  releaseBleHostOnUsbSwitch();
   // Drain queued packets immediately when INT is asserted; fall back to a bounded periodic poll.
   if (!swdActive && (readBBQINT() == LOW || (uint32_t)(millis()-lastI2CPoll) >= IDLE_I2C_POLL_MS)) {
     lastI2CPoll = millis();
