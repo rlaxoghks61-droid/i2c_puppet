@@ -26,6 +26,7 @@ static int lastError=0;
 static uint32_t lastErrsrc=0, lastEventBits=0;
 static uint8_t version=0, keyStat=0;
 static bool validVersion=false;
+static bool twimActive=false;
 
 static bool pinHigh(uint8_t p) { return (NRF_P0->IN & (1UL << p)) != 0; }
 
@@ -47,6 +48,19 @@ static void startTWIM() {
   NRF_TWIM0->FREQUENCY = TWIM_FREQUENCY_FREQUENCY_K100;
   NRF_TWIM0->SHORTS = TWIM_SHORTS_LASTTX_STARTRX_Msk | TWIM_SHORTS_LASTRX_STOP_Msk;
   NRF_TWIM0->ENABLE = (TWIM_ENABLE_ENABLE_Enabled << TWIM_ENABLE_ENABLE_Pos);
+  twimActive=true;
+}
+
+// Keep nRF completely passive on both I2C lines (no TWIM signal generation).
+static void releaseTWIM() {
+  NRF_TWIM0->ENABLE = (TWIM_ENABLE_ENABLE_Disabled << TWIM_ENABLE_ENABLE_Pos);
+  NRF_TWIM0->PSEL.SDA = 0xFFFFFFFFUL;
+  NRF_TWIM0->PSEL.SCL = 0xFFFFFFFFUL;
+  NRF_P0->DIRCLR = (1UL << SDA_GPIO) | (1UL << SCL_GPIO);
+  configureI2CPin(SDA_GPIO);
+  configureI2CPin(SCL_GPIO);
+  twimActive=false;
+  validVersion=false;
 }
 
 static void printHex(uint8_t x) {
@@ -192,19 +206,36 @@ void setup() {
     (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
     (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
     (GPIO_PIN_CNF_PULL_Pullup << GPIO_PIN_CNF_PULL_Pos);
-  startTWIM();
-  printBus("START");
-  Serial.println("READY_V2");
+  releaseTWIM();
+  Serial.println("BBQ20KBD I2C_DIAG_V3 PASSIVE_GPIO_FIRST");
+  Serial.println("TWIM DISABLED, SDA/SCL INPUT PULLUP, NO I2C TRANSFERS");
+  printBus("PASSIVE_START");
+  Serial.println("COMMANDS: a=attach TWIM and probe, d=disable TWIM and release I2C lines");
+  Serial.println("READY_V3");
   Serial.flush();
 }
 
 void loop() {
+  while (Serial.available()) {
+    char cmd=(char)Serial.read();
+    if(cmd=='a'||cmd=='A') {
+      startTWIM();
+      Serial.println("TWIM_ATTACHED");
+    } else if(cmd=='d'||cmd=='D') {
+      releaseTWIM();
+      Serial.println("TWIM_DISABLED");
+    }
+  }
   uint32_t now=millis();
   if ((uint32_t)(now-lastScan)>=SCAN_MS) {
     lastScan=now;
-    probe();
+    if (twimActive) probe();
+    else {
+      Serial.print("PASSIVE ms="); Serial.print(now);
+      printBus(" TWIM_DISABLED");
+    }
   }
-  if ((uint32_t)(now-lastEvent)>=EVENT_MS) {
+  if (twimActive && (uint32_t)(now-lastEvent)>=EVENT_MS) {
     lastEvent=now;
     pollEvents();
   }

@@ -19,3 +19,15 @@ the code keeps printing HEARTBEAT and REG01_VER result statuses:
 This is a diagnostic image, no BLE HID, not the final keyboard firmware.
 Do not test OpenOCD while this UF2 is installed; it temporarily replaces
 the SWD CMSIS-DAP probe on nice!nano.
+
+
+## V3 passive bus ownership test
+
+At boot, disable TWIM0 and disconnect its PSEL mapping, configure SDA=P0.04
+and SCL=P0.05 as inputs with pull-ups. **No I2C transfers or clock pulses**.
+Serial monitor 115200 prints PASSIVE_START then PASSIVE every second.
+If SDA stays LOW in this state, the disabled TWIM0 is not actively driving it;
+identify an external low driver or other electrical issue before reflashing.
+When SDA is HIGH, send the letter 'a' in Serial Monitor to enable TWIM and
+run bounded I2C probes. Send 'd' to disable TWIM again.
+Pins and RP2040 firmware unchanged.
