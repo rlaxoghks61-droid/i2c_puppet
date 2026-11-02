@@ -4,7 +4,7 @@
   Proven wiring: D3 INT=P0.29, D4 SDA=P0.04, D5 SCL=P0.05.
   Standard i2c_puppet on RP2040: 7-bit address 0x1F;
     REG_VER=0x01 (1 byte), REG_KEY=0x04 (1 byte FIFO count),
-    REG_FIF=0x09 (2 bytes: state, ASCII key). NOT 0x70/4 bytes.
+    REG_FIF=0x09 (2 bytes: state, ASCII key), custom HID REG_ESP_KEY_EVENT=0x70 (4 bytes).
   No BLE or SWD on this diagnostic image.
   USB Serial 115200; prints STATUS and KEY lines.
 */
@@ -19,7 +19,7 @@ static const uint8_t SCL_GPIO = 5;
 static const uint8_t INT_GPIO = 29;
 static const uint32_t STATUS_INTERVAL = 1000;
 static uint32_t lastStatus = 0, lastPoll = 0;
-static uint32_t addrOk = 0, addrFail = 0, verOk = 0, verFail = 0, keyOk = 0, keyFail = 0, fifoOk = 0, fifoFail = 0;
+static uint32_t addrOk = 0, addrFail = 0, verOk = 0, verFail = 0, keyOk = 0, keyFail = 0, fifoOk = 0, fifoFail = 0, eventOk=0, eventFail=0, eventCount=0;
 static uint8_t lastVer = 0, lastCount = 0;
 static int lastErr = 0;
 
@@ -89,6 +89,9 @@ static void queryStatus() {
   Serial.print(" ver_fail="); Serial.print(verFail);
   Serial.print(" FW=0x"); printByteHex(lastVer);
   Serial.print(" fifo_count="); Serial.print(lastCount);
+  Serial.print(" event_ok="); Serial.print(eventOk);
+  Serial.print(" event_fail="); Serial.print(eventFail);
+  Serial.print(" event_packets="); Serial.print(eventCount);
   Serial.print(" INT="); Serial.print(irq());
   Serial.print(" SDA="); Serial.print(sda());
   Serial.print(" SCL="); Serial.println(scl());
@@ -128,13 +131,42 @@ static void pollKeyboard() {
   }
 }
 
+
+static void pollCustomHID() {
+  int err=0;
+  for (int i=0;i<12;i++) {
+    uint8_t evt[4]={0,0,0,0};
+    if (!regRead(0x70,evt,4,&err)) {
+      eventFail++;
+      static uint32_t lastError=0;
+      if (millis()-lastError>2000) {
+        Serial.print("READ_EVENT_70_FAIL err="); Serial.println(err);
+        lastError=millis();
+      }
+      return;
+    }
+    eventOk++;
+    if (!evt[0]) break; // empty queue; stop draining
+    eventCount++;
+    Serial.print("EVENT70 TYPE="); Serial.print(evt[0]);
+    Serial.print(" A=0x"); printByteHex(evt[1]);
+    Serial.print(" B=0x"); printByteHex(evt[2]);
+    Serial.print(" C=0x"); printByteHex(evt[3]);
+    if (evt[0] == 1) {
+      Serial.print(" KEY_HID=0x"); printByteHex(evt[2]);
+      Serial.print(" STATE="); Serial.print(evt[3]);
+    }
+    Serial.println();
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   unsigned long start = millis();
   while (!Serial && millis() - start < 3500) delay(10);
   Serial.println("\nBBQ20KBD I2C_PUPPET 0x1F v1.1 DIAGNOSTIC");
   Serial.println("INT=D3(P0.29) SDA=D4(P0.04) SCL=D5(P0.05)");
-  Serial.println("REG_VER=01 REG_KEY=04 REG_FIFO=09(2 bytes)");
+  Serial.println("REG_VER=01 REG_KEY=04 REG_FIFO=09(2 bytes) ESP_HID=70(4 bytes)");
   setupI2C();
   Serial.print("TWIM0 PSEL SDA="); Serial.print(NRF_TWIM0->PSEL.SDA);
   Serial.print(" SCL="); Serial.println(NRF_TWIM0->PSEL.SCL);
@@ -146,6 +178,7 @@ void loop() {
   if (now - lastPoll >= 30) {
     lastPoll=now;
     pollKeyboard();
+    pollCustomHID();
   }
   if (now - lastStatus >= STATUS_INTERVAL) {
     lastStatus=now;

@@ -7,7 +7,8 @@ RP2040 protocol (repo's NRF52 branch):
   0x01 1 byte firmware version (VER=0x11 for 1.1)
   0x04 1 byte fifo_count
   0x09 2 byte pressed/held/released and ASCII keycode
-No unsupported custom 0x70 4-byte packet.
+Also tests custom 0x70 4-byte HID events (from app/esp_i2c.h of NRF52 branch).
+The installed RP2040 image supports BOTH: official FIFO 0x09/2-byte and custom HID FIFO 0x70/4-byte.
 
 Flashing the UF2 replaces the nRF SWD programmer temporarily.
 Double reset to the nice!nano bootloader, drag UF2 to disk.
