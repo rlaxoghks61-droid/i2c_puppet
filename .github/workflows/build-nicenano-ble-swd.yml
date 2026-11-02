@@ -1,0 +1,47 @@
+name: Build nice nano BLE HID and USB CMSIS-DAP
+on:
+  push:
+    paths:
+      - 'NICENANO_BLE_SWD/**'
+      - '.github/workflows/build-nicenano-ble-swd.yml'
+  workflow_dispatch:
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install core
+        run: |
+          set -euo pipefail
+          IDX='https://raw.githubusercontent.com/rlaxoghks61-droid/i2c_puppet/NICENANO_V2_SWD_PROGRAMMER/NICENANO_V2_SWD/package_nRFMicro_fixed_index.json'
+          SEEED='https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json'
+          arduino-cli core update-index --additional-urls "$IDX,$SEEED"
+          arduino-cli core install Seeeduino:nrf52 --additional-urls "$IDX,$SEEED"
+          arduino-cli core install 'nRFMicro:nrf52@1.0.2' --additional-urls "$IDX,$SEEED"
+      - name: Install Adafruit nrfutil
+        run: pipx install adafruit-nrfutil
+      - name: Compile S140 v6
+        run: |
+          arduino-cli compile --fqbn 'nRFMicro:nrf52:nicenanov2:softdevice=s140v6' --build-property 'build.ldscript=nrf52840_s140_v6.ld' --output-dir build_combined NICENANO_BLE_SWD
+      - name: Convert to UF2
+        run: |
+          set -euo pipefail
+          CONVERTER=$(find ~/.arduino15/packages -path '*/tools/uf2conv/uf2conv.py' -print -quit)
+          test -n "$CONVERTER"
+          python3 "$CONVERTER" -c -f 0xADA52840 -o build_combined/NICENANO_BLE_SWD.uf2 build_combined/NICENANO_BLE_SWD.ino.hex
+          python3 - <<'PY'
+          import struct
+          data=open('build_combined/NICENANO_BLE_SWD.uf2','rb').read()
+          assert data and len(data)%512==0
+          blocks=[struct.unpack_from('<8I',data,i) for i in range(0,len(data),512)]
+          assert min(x[3] for x in blocks)==0x26000
+          assert all(x[0]==0x0A324655 and x[1]==0x9E5D5157 and x[7]==0xADA52840 for x in blocks)
+          print('UF2 verified',len(blocks))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NICENANO-BLE-CMSIS-DAP-UF2
+          path: |
+            build_combined/NICENANO_BLE_SWD.uf2
+            build_combined/NICENANO_BLE_SWD.ino.hex
