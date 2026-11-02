@@ -230,6 +230,51 @@ static void serviceCMSIS() {
 BLEDis bledis;
 BLEHidAdafruit blehid;
 
+// Balanced BLE HID profile: requested 11.25-15ms, slave latency 2,
+// 3s supervision timeout. The central (phone/PC) decides actual parameters.
+static constexpr uint16_t BLE_PROFILE_MIN_UNITS = 9;
+static constexpr uint16_t BLE_PROFILE_MAX_UNITS = 12;
+static constexpr uint16_t BLE_PROFILE_SLAVE_LATENCY = 2;
+static constexpr uint16_t BLE_PROFILE_TIMEOUT_UNITS = 300; // 3s in 10ms units
+static bool bleProfileConfigured = false;
+static bool wasBleConnected = false;
+static uint32_t bleConnectedAt = 0;
+static bool bleParamAttempted = false;
+static bool bleParamRequestOK = false;
+
+static void serviceBalancedBleProfile() {
+  const bool connected = (Bluefruit.connected() != 0);
+  if (connected != wasBleConnected) {
+    wasBleConnected = connected;
+    bleConnectedAt = millis();
+    bleParamAttempted = false;
+    bleParamRequestOK = false;
+  }
+  if (!connected || bleParamAttempted || (uint32_t)(millis()-bleConnectedAt) < 2500UL) return;
+
+  BLEConnection* conn = Bluefruit.Connection(Bluefruit.connHandle());
+  if (!conn || !conn->connected()) return;
+
+  const uint16_t currentInterval = conn->getConnectionInterval();
+  const uint16_t currentLatency = conn->getSlaveLatency();
+  if (currentInterval >= BLE_PROFILE_MIN_UNITS &&
+      currentInterval <= BLE_PROFILE_MAX_UNITS &&
+      currentLatency == BLE_PROFILE_SLAVE_LATENCY) {
+    bleParamAttempted = true;
+    bleParamRequestOK = true;
+    return;
+  }
+  // Once per BLE connection; do not spam parameter updates and disrupt HID.
+  // Preserve an already-low-latency interval if inside the preferred range.
+  const uint16_t targetInterval =
+      (currentInterval >= BLE_PROFILE_MIN_UNITS &&
+       currentInterval <= BLE_PROFILE_MAX_UNITS) ? currentInterval : BLE_PROFILE_MAX_UNITS;
+  bleParamAttempted = true;
+  bleParamRequestOK = conn->requestConnectionParameter(
+      targetInterval, BLE_PROFILE_SLAVE_LATENCY, BLE_PROFILE_TIMEOUT_UNITS);
+}
+
+
 // USB has priority whenever a USB host has enumerated this device.
 // BLE remains connected but does not receive keyboard/mouse/consumer events
 // while USB is active. CMSIS-DAP is independent.
@@ -599,12 +644,24 @@ void startAdv() {
 
 
 void printDiagnostics() {
+  // Avoid formatting and USB CDC writes while operating wirelessly on battery.
+  if (!TinyUSBDevice.mounted() || !Serial) return;
   if(millis()-lastDiag<DIAG_INTERVAL_MS) return;
   lastDiag=millis();
   Serial.print("BLE=");Serial.print(Bluefruit.connected()?1:0);
   Serial.print(" USB=");Serial.print(TinyUSBDevice.mounted()?1:0);
   Serial.print(" USB_HID=");Serial.print(usb_input_hid.isValid()?1:0);
   Serial.print(" OUT=");Serial.print(useUsbInput()?"USB":(Bluefruit.connected()?"BLE":"NONE"));
+  Serial.print(" BLE_PROFILE=");Serial.print(bleProfileConfigured?1:0);
+  Serial.print(" BLE_PARAM_REQ=");Serial.print(bleParamAttempted?1:0);
+  Serial.print(" BLE_PARAM_OK=");Serial.print(bleParamRequestOK?1:0);
+  if (Bluefruit.connected()) {
+    BLEConnection* c = Bluefruit.Connection(Bluefruit.connHandle());
+    if (c && c->connected()) {
+      Serial.print(" BLE_INTERVAL_MS=");Serial.print(c->getConnectionInterval()*1.25f,2);
+      Serial.print(" BLE_LATENCY=");Serial.print(c->getSlaveLatency());
+    }
+  }
   Serial.print(" SWD=");Serial.print(swdActive?1:0);
   Serial.print(" REG70_OK=");Serial.print(reg70Ok);
   Serial.print(" REG70_FAIL=");Serial.print(reg70Fail);
@@ -646,10 +703,19 @@ void setup() {
   bledis.begin();
 
   blehid.begin();
+  // BLEHidAdafruit::begin() already sets 9-12 units; make the profile explicit
+  // after begin() so its default request cannot overwrite our parameters.
+  const bool intervalOK = Bluefruit.Periph.setConnInterval(
+      BLE_PROFILE_MIN_UNITS, BLE_PROFILE_MAX_UNITS);
+  const bool latencyOK = Bluefruit.Periph.setConnSlaveLatency(
+      BLE_PROFILE_SLAVE_LATENCY);
+  const bool timeoutOK = Bluefruit.Periph.setConnSupervisionTimeoutMS(3000);
+  bleProfileConfigured = intervalOK && latencyOK && timeoutOK;
 
   startAdv();
 
   Serial.println("USB-FIRST Keyboard/Mouse/Consumer + BLE fallback + USB CMSIS-DAP initialized");
+  Serial.println("BLE balanced: 11.25-15ms, latency=2, supervision=3000ms; no deep sleep");
   Serial.println("Full keyboard state FIFO 32 (ESP32-style), 0.9x mouse, shorts navigation guard 350ms");
   Serial.println("MOUSE: 0.9x; shorts navigation no backlog + 350ms guard, no BLE backlog; send v for packet logs");
   Serial.println("I2C SDA=P0.04 SCL=P1.15 INT=P1.13; SWDIO=P1.14 SWCLK=P1.12");
@@ -657,6 +723,7 @@ void setup() {
 
 void loop() {
   serviceCMSIS();
+  serviceBalancedBleProfile();
   updateOutputRoute();
   releaseBleHostOnUsbSwitch();
   // Drain queued packets immediately when INT is asserted; fall back to a bounded periodic poll.
