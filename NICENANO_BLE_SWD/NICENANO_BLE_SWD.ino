@@ -242,6 +242,26 @@ uint32_t languageReleaseAt = 0;
 
 bool languageCombo = false;
 
+// RP2040 sends navigation arrow press and release back-to-back.
+// Queue each stroke so the BLE host receives distinct HID reports.
+static constexpr uint8_t NAV_Q_SIZE = 16;
+uint8_t navQueue[NAV_Q_SIZE] = {0};
+uint8_t navHead = 0, navTail = 0;
+bool navPulsePressed = false;
+uint32_t navPulsesSent = 0;
+uint32_t navQueueOverflow = 0;
+
+static bool isArrowKey(uint8_t key) {
+  return key >= 0x4F && key <= 0x52; // Right, Left, Down, Up
+}
+static void queueNavKey(uint8_t key) {
+  const uint8_t next = (uint8_t)((navHead + 1) % NAV_Q_SIZE);
+  if (next == navTail) { navQueueOverflow++; return; }
+  navQueue[navHead] = key;
+  navHead = next;
+}
+
+
 // Diagnostic counters
 uint32_t reg70Ok = 0;
 uint32_t reg70Fail = 0;
@@ -265,6 +285,11 @@ uint8_t effectiveMods() {
 
 void updateKey(uint8_t mod, uint8_t key, uint8_t state) {
   if (state != 1 && state != 3) return;
+
+  if (isArrowKey(key)) {
+    if (state == 1) queueNavKey(key);
+    return;
+  }
 
   if ((mod & 0x22) && key == 0x2C) {
     if (state == 1) {
@@ -443,6 +468,9 @@ void printDiagnostics() {
   Serial.print(" REG70_OK=");Serial.print(reg70Ok);
   Serial.print(" REG70_FAIL=");Serial.print(reg70Fail);
   Serial.print(" PACKETS=");Serial.print(packetCount);
+  Serial.print(" NAV_SENT=");Serial.print(navPulsesSent);
+  Serial.print(" NAV_Q=");Serial.print((navHead+NAV_Q_SIZE-navTail)%NAV_Q_SIZE);
+  Serial.print(" NAV_OVF=");Serial.print(navQueueOverflow);
   Serial.print(" TWIM_OK=");Serial.print(twimOkay);
   Serial.print(" TWIM_TIMEOUT=");Serial.print(twimTimeouts);
   Serial.print(" SDA=");Serial.print(pinHigh(BBQ_PHYS_SDA));
@@ -501,6 +529,8 @@ void loop() {
 
     pendingX = 0;
     pendingY = 0;
+    navTail = navHead;
+    navPulsePressed = false;
 
     delay(2);
     return;
@@ -510,6 +540,26 @@ void loop() {
 
   if (now - lastTx < TX_INTERVAL_MS) {
     delay(1);
+    return;
+  }
+
+  // Emit independent BLE reports for arrow press and release.
+  if (navPulsePressed) {
+    if (blehid.keyboardReport(effectiveMods(), keys)) {
+      navPulsePressed = false;
+      navTail = (uint8_t)((navTail + 1) % NAV_Q_SIZE);
+      navPulsesSent++;
+      keyboardDirty = false;
+      lastTx = now;
+    }
+    return;
+  }
+  if (navTail != navHead) {
+    uint8_t navKeys[6] = { navQueue[navTail], 0, 0, 0, 0, 0 };
+    if (blehid.keyboardReport(effectiveMods(), navKeys)) {
+      navPulsePressed = true;
+      lastTx = now;
+    }
     return;
   }
 
