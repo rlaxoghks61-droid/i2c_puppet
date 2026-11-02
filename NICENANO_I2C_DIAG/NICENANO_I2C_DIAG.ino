@@ -2,9 +2,9 @@
   BBQ20KBD RP2040 / nice!nano v2 I2C Diagnostic V2.
   Native nRF52840 TWIM0 EasyDMA with bounded wait, no Wire busy loops.
   Confirmed physical GPIO mapping:
-      INT D3 = P0.29 (input/pullup)
-      SDA D4 = P0.04 (I2C open drain/pullup)
-      SCL D5 = P0.05 (I2C open drain/pullup)
+      INT D8 = P1.13 (input/pullup)
+      SDA D3 = P0.20 (I2C open drain/pullup)
+      SCL D10 = P0.09 (I2C open drain/pullup)
   RP2040 i2c_puppet firmware ("NRF52" branch): address 0x1F;
   registers 0x01 VER, 0x04 KEY status, 0x09 stock FIFO,
   0x70 4-byte custom HID event FIFO.
@@ -14,7 +14,7 @@
 #include <Adafruit_TinyUSB.h>
 #include <nrf.h>
 
-static const uint8_t SDA_GPIO = 4, SCL_GPIO = 5, INT_GPIO = 29;
+static const uint8_t SDA_GPIO = 20, SCL_GPIO = 9, INT_GPIO = 13; // INT=P1.13
 static const uint8_t I2C_ADDR = 0x1f;
 static const uint32_t I2C_TIMEOUT_US = 20000UL;
 static const uint32_t SCAN_MS = 1000UL;
@@ -29,6 +29,7 @@ static bool validVersion=false;
 static bool twimActive=false;
 
 static bool pinHigh(uint8_t p) { return (NRF_P0->IN & (1UL << p)) != 0; }
+static bool intHigh() { return (NRF_P1->IN & (1UL << INT_GPIO)) != 0; }
 
 static void configureI2CPin(uint8_t p) {
   NRF_P0->PIN_CNF[p] =
@@ -138,7 +139,7 @@ static void printBus(const char *label) {
   Serial.print(label);
   Serial.print(" SDA=");Serial.print(pinHigh(SDA_GPIO));
   Serial.print(" SCL=");Serial.print(pinHigh(SCL_GPIO));
-  Serial.print(" INT=");Serial.print(pinHigh(INT_GPIO));
+  Serial.print(" INT=");Serial.print(intHigh());
   Serial.print(" PSEL_SDA=");Serial.print(NRF_TWIM0->PSEL.SDA);
   Serial.print(" PSEL_SCL=");Serial.println(NRF_TWIM0->PSEL.SCL);
 }
@@ -201,8 +202,8 @@ void setup() {
   while(!Serial && (uint32_t)(millis()-t0) < 3500UL) delay(10);
   Serial.println();
   Serial.println("BBQ20KBD I2C_DIAG_V2 NATIVE_TWIM_BOUNDED");
-  Serial.println("GPIO INT=P0.29 SDA=P0.04 SCL=P0.05, ADDR=0x1F");
-  NRF_P0->PIN_CNF[INT_GPIO] =
+  Serial.println("GPIO INT=P1.13(D8) SDA=P0.20(D3) SCL=P0.09(D10), ADDR=0x1F");
+  NRF_P1->PIN_CNF[INT_GPIO] =
     (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
     (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
     (GPIO_PIN_CNF_PULL_Pullup << GPIO_PIN_CNF_PULL_Pos);
