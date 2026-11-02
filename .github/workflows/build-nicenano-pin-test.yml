@@ -1,0 +1,45 @@
+name: Build nice nano D0-D10 GPIO PIN TEST UF2
+on:
+  push:
+    paths:
+      - 'NICENANO_PIN_TEST/**'
+      - '.github/workflows/build-nicenano-pin-test.yml'
+  workflow_dispatch:
+jobs:
+  build-pin-scanner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install nice nano Arduino core
+        run: |
+          set -euo pipefail
+          IDX='https://raw.githubusercontent.com/rlaxoghks61-droid/i2c_puppet/NICENANO_V2_SWD_PROGRAMMER/NICENANO_V2_SWD/package_nRFMicro_fixed_index.json'
+          SEEED='https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json'
+          arduino-cli core update-index --additional-urls "$IDX,$SEEED"
+          arduino-cli core install Seeeduino:nrf52 --additional-urls "$IDX,$SEEED"
+          arduino-cli core install nRFMicro:nrf52@1.0.2 --additional-urls "$IDX,$SEEED"
+      - name: Compile for S140 6.1.1
+        run: |
+          arduino-cli compile --fqbn 'nRFMicro:nrf52:nicenanov2:softdevice=s140v6' --build-property build.ldscript=nrf52840_s140_v6.ld --output-dir build_pin_scan NICENANO_PIN_TEST
+      - name: Generate and validate UF2
+        run: |
+          set -euo pipefail
+          CONV=$(find ~/.arduino15/packages -path '*/tools/uf2conv/uf2conv.py' -print -quit)
+          test -n "$CONV"
+          python3 "$CONV" -c -f 0xADA52840 -o build_pin_scan/NICENANO_D0_D10_PIN_TEST.uf2 build_pin_scan/NICENANO_PIN_TEST.ino.hex
+          python3 - <<'PY'
+          import struct
+          s=open('build_pin_scan/NICENANO_D0_D10_PIN_TEST.uf2','rb').read()
+          assert s and len(s)%512 == 0
+          h=[struct.unpack_from('<8I',s,n) for n in range(0,len(s),512)]
+          assert min(v[3] for v in h)==0x26000
+          assert all(v[0]==0x0A324655 and v[1]==0x9E5D5157 and v[7]==0xADA52840 for v in h)
+          print('UF2 verified:',len(h),'blocks')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NICENANO-D0-D10-PIN-TEST-UF2
+          path: |
+            build_pin_scan/NICENANO_D0_D10_PIN_TEST.uf2
+            build_pin_scan/NICENANO_PIN_TEST.ino.hex
