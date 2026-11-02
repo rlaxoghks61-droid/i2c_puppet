@@ -1,5 +1,5 @@
 // Free-DAP platform adapter for nice!nano v2 nRF52840.
-// P1.14 SWCLK ; P1.13 SWDIO (bidirectional), fixed GPIO indices.
+// D7 / P0.11 SWCLK ; D9 / P1.06 SWDIO (bidirectional), fixed GPIO indices.
 // External RP2040 powered separately/shared common 3.3 V rail and GND.
 // License of dap.c/dap.h: BSD-3-Clause. This adapter: MIT.
 #ifndef XIAO_NRF52840_DAP_CONFIG_H
@@ -24,25 +24,25 @@
 #define DAP_CONFIG_DELAY_CONSTANT      5000
 #define DAP_CONFIG_FAST_CLOCK          20000000
 
-#define SWCLK_MASK (1UL << 14) // SWCLK physical = nRF P1.14
-#define SWDIO_MASK (1UL << 13) // SWDIO physical = nRF P1.13
+#define SWCLK_MASK (1UL << 11) // physical D7 / P0.11
+#define SWDIO_MASK (1UL << 6) // physical D9 / P1.06
 
-static inline void DAP_CONFIG_SWCLK_TCK_write(int v) { if(v) NRF_P1->OUTSET=SWCLK_MASK; else NRF_P1->OUTCLR=SWCLK_MASK; }
+static inline void DAP_CONFIG_SWCLK_TCK_write(int v) { if(v) NRF_P0->OUTSET=SWCLK_MASK; else NRF_P0->OUTCLR=SWCLK_MASK; }
 static inline void DAP_CONFIG_SWDIO_TMS_write(int v) { if(v) NRF_P1->OUTSET=SWDIO_MASK; else NRF_P1->OUTCLR=SWDIO_MASK; }
 static inline void DAP_CONFIG_TDI_write(int v) { (void)v; }
 static inline void DAP_CONFIG_TDO_write(int v) { (void)v; }
 static inline void DAP_CONFIG_nTRST_write(int v) { (void)v; }
 static inline void DAP_CONFIG_nRESET_write(int v) { (void)v; } // target reset not wired
 
-static inline int DAP_CONFIG_SWCLK_TCK_read(void) { return !!(NRF_P1->IN & SWCLK_MASK); }
+static inline int DAP_CONFIG_SWCLK_TCK_read(void) { return !!(NRF_P0->IN & SWCLK_MASK); }
 static inline int DAP_CONFIG_SWDIO_TMS_read(void) { return !!(NRF_P1->IN & SWDIO_MASK); }
 static inline int DAP_CONFIG_TDI_read(void) { return 0; }
 static inline int DAP_CONFIG_TDO_read(void) { return 0; }
 static inline int DAP_CONFIG_nTRST_read(void) { return 1; }
 static inline int DAP_CONFIG_nRESET_read(void) { return 1; }
 
-static inline void DAP_CONFIG_SWCLK_TCK_set(void) { NRF_P1->OUTSET=SWCLK_MASK; }
-static inline void DAP_CONFIG_SWCLK_TCK_clr(void) { NRF_P1->OUTCLR=SWCLK_MASK; }
+static inline void DAP_CONFIG_SWCLK_TCK_set(void) { NRF_P0->OUTSET=SWCLK_MASK; }
+static inline void DAP_CONFIG_SWCLK_TCK_clr(void) { NRF_P0->OUTCLR=SWCLK_MASK; }
 static inline void DAP_CONFIG_SWDIO_TMS_in(void) { NRF_P1->DIRCLR=SWDIO_MASK; }
 static inline void DAP_CONFIG_SWDIO_TMS_out(void) {
   NRF_P1->OUTSET = SWDIO_MASK; // safe before enabling output driver
@@ -50,17 +50,21 @@ static inline void DAP_CONFIG_SWDIO_TMS_out(void) {
 }
 
 static inline void DAP_CONFIG_SETUP(void) {
-  NRF_P1->DIRCLR = SWCLK_MASK | SWDIO_MASK;
-  NRF_P1->PIN_CNF[13] = (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos);
-  NRF_P1->PIN_CNF[14] = (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos);
-  NRF_P1->OUTSET = SWCLK_MASK | SWDIO_MASK;
+  NRF_P0->DIRCLR = SWCLK_MASK;
+  NRF_P1->DIRCLR = SWDIO_MASK;
+  NRF_P1->PIN_CNF[6] = (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos);
+  NRF_P0->PIN_CNF[11] = (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos);
+  NRF_P0->OUTSET = SWCLK_MASK;
+  NRF_P1->OUTSET = SWDIO_MASK;
 }
 static inline void DAP_CONFIG_DISCONNECT(void) {
-  NRF_P1->DIRCLR = SWCLK_MASK | SWDIO_MASK;
+  NRF_P0->DIRCLR = SWCLK_MASK;
+  NRF_P1->DIRCLR = SWDIO_MASK;
 }
 static inline void DAP_CONFIG_CONNECT_SWD(void) {
-  NRF_P1->OUTSET = SWCLK_MASK | SWDIO_MASK;
-  NRF_P1->DIRSET = SWCLK_MASK;
+  NRF_P0->OUTSET = SWCLK_MASK;
+  NRF_P1->OUTSET = SWDIO_MASK;
+  NRF_P0->DIRSET = SWCLK_MASK;
   DAP_CONFIG_SWDIO_TMS_out();
 }
 static inline void DAP_CONFIG_CONNECT_JTAG(void) { DAP_CONFIG_CONNECT_SWD(); }
