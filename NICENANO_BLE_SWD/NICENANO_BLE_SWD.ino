@@ -221,6 +221,20 @@ uint8_t mods = 0;
 uint8_t keys[6] = {0};
 uint8_t keyMods[6] = {0};
 
+// Preserve every keyboard state change, as in the working ESP32 bridge.
+// Otherwise press+release processed in one I2C batch collapses into no key event.
+static constexpr uint8_t KEY_FRAME_CAP = 32;
+struct KeyFrame {
+  uint8_t mod;
+  uint8_t key[6];
+};
+KeyFrame keyFrames[KEY_FRAME_CAP];
+uint8_t keyFrameHead=0, keyFrameTail=0, keyFrameCount=0;
+uint32_t keyFrameOverflows=0;
+uint32_t keyFramesSent=0;
+bool keyboardResyncNeeded=true;
+
+
 uint8_t mouseButtons = 0;
 uint16_t consumerUsage = 0;
 
@@ -297,6 +311,25 @@ uint8_t effectiveMods() {
   return m;
 }
 
+void enqueueCurrentKeyFrame() {
+  KeyFrame frame;
+  frame.mod = effectiveMods();
+  memcpy(frame.key, keys, 6);
+  if (keyFrameCount) {
+    const uint8_t prev = (uint8_t)((keyFrameTail + KEY_FRAME_CAP - 1) % KEY_FRAME_CAP);
+    if (keyFrames[prev].mod == frame.mod && memcmp(keyFrames[prev].key,frame.key,6)==0) return;
+  }
+  if (keyFrameCount == KEY_FRAME_CAP) {
+    // Avoid sending a stale backlog; recover from current physical state.
+    keyFrameHead = keyFrameTail = keyFrameCount = 0;
+    keyFrameOverflows++;
+    keyboardResyncNeeded = true;
+  }
+  keyFrames[keyFrameTail] = frame;
+  keyFrameTail = (uint8_t)((keyFrameTail+1) % KEY_FRAME_CAP);
+  keyFrameCount++;
+}
+
 void updateKey(uint8_t mod, uint8_t key, uint8_t state) {
   if (state != 1 && state != 3) return;
 
@@ -350,6 +383,7 @@ void updateKey(uint8_t mod, uint8_t key, uint8_t state) {
   }
 
   keyboardDirty = true;
+  enqueueCurrentKeyFrame();
 }
 
 int8_t scaledAxis(int8_t raw, int16_t &rem) {
@@ -485,6 +519,9 @@ void printDiagnostics() {
   Serial.print(" NAV_Q=");Serial.print((navHead+NAV_Q_SIZE-navTail)%NAV_Q_SIZE);
   Serial.print(" NAV_OVF=");Serial.print(navQueueOverflow);
   Serial.print(" NAV_DROP=");Serial.print(navSuppressed);
+  Serial.print(" KEY_Q=");Serial.print(keyFrameCount);
+  Serial.print(" KEY_SENT=");Serial.print(keyFramesSent);
+  Serial.print(" KEY_OVF=");Serial.print(keyFrameOverflows);
   Serial.print(" TWIM_OK=");Serial.print(twimOkay);
   Serial.print(" TWIM_TIMEOUT=");Serial.print(twimTimeouts);
   Serial.print(" SDA=");Serial.print(pinHigh(BBQ_PHYS_SDA));
@@ -519,6 +556,7 @@ void setup() {
   startAdv();
 
   Serial.println("BLE HID + USB CMSIS-DAP initialized");
+  Serial.println("Full keyboard state FIFO 32 (ESP32-style), 0.9x mouse, shorts navigation guard 350ms");
   Serial.println("MOUSE: 0.9x; shorts navigation no backlog + 350ms guard, no BLE backlog; send v for packet logs");
   Serial.println("I2C SDA=P0.04 SCL=P1.15 INT=P1.13; SWDIO=P1.14 SWCLK=P1.12");
 }
@@ -545,6 +583,8 @@ void loop() {
     pendingY = 0;
     navTail = navHead;
     navPulsePressed = false;
+    keyFrameHead=keyFrameTail=keyFrameCount=0;
+    keyboardResyncNeeded=true;
 
     delay(2);
     return;
@@ -563,7 +603,7 @@ void loop() {
       navPulsePressed = false;
       navTail = (uint8_t)((navTail + 1) % NAV_Q_SIZE);
       navPulsesSent++;
-      keyboardDirty = false;
+      keyboardResyncNeeded = true;
       lastTx = now;
     }
     return;
@@ -591,10 +631,23 @@ void loop() {
     keyboardDirty = true;
   }
 
-  if (keyboardDirty) {
+  if (keyFrameCount) {
+    const KeyFrame &frame=keyFrames[keyFrameHead];
+    if (blehid.keyboardReport(frame.mod, frame.key)) {
+      keyFrameHead=(uint8_t)((keyFrameHead+1)%KEY_FRAME_CAP);
+      keyFrameCount--;
+      keyFramesSent++;
+      keyboardDirty=false;
+      keyboardResyncNeeded=false;
+      lastTx=now;
+    }
+    return;
+  }
+  if (keyboardResyncNeeded || keyboardDirty) {
     if (blehid.keyboardReport(effectiveMods(), keys)) {
-      keyboardDirty = false;
-      lastTx = now;
+      keyboardResyncNeeded=false;
+      keyboardDirty=false;
+      lastTx=now;
     }
     return;
   }
