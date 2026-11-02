@@ -632,7 +632,7 @@ void loop() {
   }
 
   if (keyFrameCount) {
-    const KeyFrame &frame=keyFrames[keyFrameHead];
+    KeyFrame &frame=keyFrames[keyFrameHead];
     if (blehid.keyboardReport(frame.mod, frame.key)) {
       keyFrameHead=(uint8_t)((keyFrameHead+1)%KEY_FRAME_CAP);
       keyFrameCount--;
