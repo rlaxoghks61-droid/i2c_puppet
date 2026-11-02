@@ -58,6 +58,8 @@ static void configurePhysicalI2CPin(uint8_t physicalPin) {
 
 
 static const uint8_t SDA_GPIO=BBQ_PHYS_SDA, SCL_GPIO=BBQ_PHYS_SCL, INT_GPIO=BBQ_PHYS_INT;
+static const uint8_t I2C_ADDR=BBQ_ADDR;
+static const uint32_t I2C_TIMEOUT_US=20000UL;
 static volatile bool swdActive=false;
 static uint32_t twimErrors=0, twimTimeouts=0, twimOkay=0, twimIdleFails=0;
 static bool pinHigh(uint8_t p) { return (NRF_P0->IN & (1UL << p)) != 0; }
