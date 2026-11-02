@@ -3,7 +3,7 @@
  * BBQ20KBD custom firmware -> nRF52840 BLE HID Bridge
  *
  * Board: nice!nano v2 / nRF52840 compatible
- * SDA: physical D3 / P0.29
+ * SDA: physical D4 / P0.04
  * SCL: physical D10 / P1.15
  * INT: physical D8 / P1.13
  * I2C address: 0x1F
@@ -26,12 +26,13 @@ extern "C" {
 
 
 #define I2C_HZ 100000
-#define TX_INTERVAL_MS 16
+#define TX_INTERVAL_MS 8
+#define IDLE_I2C_POLL_MS 12
 #define DIAG_INTERVAL_MS 1000
 
-// User-confirmed actual GPIO mapping: SDA=P0.29, SCL=P1.15, INT=P1.13.
+// User-confirmed actual GPIO mapping: SDA=P0.04, SCL=P1.15, INT=P1.13.
 // Nordic TWIM PSEL needs port bit 5 for P1.xx pins (0x20 | pin).
-static constexpr uint8_t BBQ_PHYS_SDA = 29;
+static constexpr uint8_t BBQ_PHYS_SDA = 4;
 static constexpr uint8_t BBQ_PHYS_SCL = 15;
 static constexpr uint8_t BBQ_PHYS_INT = 13;
 static constexpr uint32_t BBQ_SCL_PSEL = 0x20UL | BBQ_PHYS_SCL;
@@ -234,6 +235,8 @@ bool mouseDirty = true;
 bool consumerDirty = true;
 
 uint32_t lastTx = 0;
+uint32_t lastI2CPoll = 0;
+bool verbosePackets = false;
 uint32_t lastDiag = 0;
 uint32_t languageReleaseAt = 0;
 
@@ -312,9 +315,9 @@ void updateKey(uint8_t mod, uint8_t key, uint8_t state) {
 
 int8_t scaledAxis(int8_t raw, int16_t &rem) {
   int16_t v = int16_t(raw) * 3 + rem;
-  int16_t out = v / 4;
+  int16_t out = v / 2; // 1.5x raw; previously 0.75x
 
-  rem = v - out * 4;
+  rem = v - out * 2;
 
   return (int8_t)constrain(out, -127, 127);
 }
@@ -369,7 +372,7 @@ void serviceInput() {
     }
 
     packetCount++;
-    printPacket(p);
+    if (verbosePackets) printPacket(p);
 
     if (p[0] == 1) {
       updateKey(p[1], p[2], p[3]);
@@ -474,13 +477,22 @@ void setup() {
   startAdv();
 
   Serial.println("BLE HID + USB CMSIS-DAP initialized");
-  Serial.println("I2C SDA=P0.29 SCL=P1.15 INT=P1.13; SWDIO=P1.14 SWCLK=P1.12");
+  Serial.println("FAST_MOUSE: 1.5x motion, 8ms TX, packet logging off (send v to toggle)");
+  Serial.println("I2C SDA=P0.04 SCL=P1.15 INT=P1.13; SWDIO=P1.14 SWCLK=P1.12");
 }
 
 void loop() {
   serviceCMSIS();
-  if(!swdActive) serviceInput();
+  // Drain queued packets immediately when INT is asserted; fall back to a bounded periodic poll.
+  if (!swdActive && (readBBQINT() == LOW || (uint32_t)(millis()-lastI2CPoll) >= IDLE_I2C_POLL_MS)) {
+    lastI2CPoll = millis();
+    serviceInput();
+  }
   printDiagnostics();
+  while (Serial.available()) {
+    const char c = (char)Serial.read();
+    if (c == 'v' || c == 'V') { verbosePackets = !verbosePackets; Serial.print("PACKET_LOG="); Serial.println(verbosePackets?1:0); }
+  }
 
   if (!Bluefruit.connected()) {
     keyboardDirty = true;
