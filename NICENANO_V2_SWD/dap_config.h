@@ -1,5 +1,5 @@
 // Free-DAP platform adapter for nice!nano v2 nRF52840.
-// P1.13 SWCLK ; P1.14 SWDIO (bidirectional), fixed GPIO indices.
+// P1.14 SWCLK ; P1.13 SWDIO (bidirectional), fixed GPIO indices.
 // External RP2040 powered separately/shared common 3.3 V rail and GND.
 // License of dap.c/dap.h: BSD-3-Clause. This adapter: MIT.
 #ifndef XIAO_NRF52840_DAP_CONFIG_H
@@ -17,15 +17,15 @@
 #define DAP_CONFIG_PRODUCT_STR         "nice!nano v2 CMSIS-DAP"
 #define DAP_CONFIG_SER_NUM_STR         "NICENANO-SWD-01"
 #define DAP_CONFIG_CMSIS_DAP_VER_STR   "1.3.0"
-#define DAP_CONFIG_FW_VER_STR          "0.1.1"
+#define DAP_CONFIG_FW_VER_STR          "0.1.2"
 
 // Calibrating timing in software is hardware/core dependent: deliberately slow.
 #define DAP_CONFIG_PERFORMANCE_ATTR
 #define DAP_CONFIG_DELAY_CONSTANT      5000
 #define DAP_CONFIG_FAST_CLOCK          20000000
 
-#define SWCLK_MASK (1UL << 13) // SWCLK physical = nRF P1.13
-#define SWDIO_MASK (1UL << 14) // SWDIO physical = nRF P1.14
+#define SWCLK_MASK (1UL << 14) // SWCLK physical = nRF P1.14
+#define SWDIO_MASK (1UL << 13) // SWDIO physical = nRF P1.13
 
 static inline void DAP_CONFIG_SWCLK_TCK_write(int v) { if(v) NRF_P1->OUTSET=SWCLK_MASK; else NRF_P1->OUTCLR=SWCLK_MASK; }
 static inline void DAP_CONFIG_SWDIO_TMS_write(int v) { if(v) NRF_P1->OUTSET=SWDIO_MASK; else NRF_P1->OUTCLR=SWDIO_MASK; }

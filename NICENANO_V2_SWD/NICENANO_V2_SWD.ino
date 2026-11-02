@@ -1,5 +1,5 @@
 // nice!nano v2 CMSIS-DAP v1 (USB HID) SWD debug probe.
-// See README_KO.md. fixed P1.13 -> RP2040 SWCLK, fixed P1.14 -> RP2040 SWDIO.
+// See README_KO.md. SWD signal correction: P1.14 -> RP2040 SWCLK, P1.13 -> RP2040 SWDIO.
 // Free-DAP BSD-3-Clause code is included as dap.c + dap.h.
 #include <Arduino.h>
 #include <Adafruit_TinyUSB.h>
