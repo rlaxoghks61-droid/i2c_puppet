@@ -83,7 +83,7 @@ void puppet_i2c_init(void)
 	self.i2c = i2c_instances[(PIN_PUPPET_SCL / 2) % 2];
 
 	i2c_init(self.i2c, 100 * 1000);
-	puppet_i2c_sync_address();
+	// Configure GPIO mux before enabling address matching / slave IRQs.
 
 	gpio_set_function(PIN_PUPPET_SDA, GPIO_FUNC_I2C);
 	gpio_pull_up(PIN_PUPPET_SDA);
@@ -99,4 +99,7 @@ void puppet_i2c_init(void)
 
 	irq_set_exclusive_handler(irq, irq_handler);
 	irq_set_enabled(irq, true);
+
+	// Enable slave mode only after pins and handler are ready.
+	puppet_i2c_sync_address();
 }
