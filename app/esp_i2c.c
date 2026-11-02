@@ -30,7 +30,7 @@ void esp_i2c_init(void)
 {
 	gpio_init(ESP_INT_PIN);
 	gpio_set_dir(ESP_INT_PIN, GPIO_OUT);
-	gpio_put(ESP_INT_PIN, 1);
+	update_int_pin();
 }
 
 static void push_event(uint8_t type, uint8_t a, uint8_t b, uint8_t c)
