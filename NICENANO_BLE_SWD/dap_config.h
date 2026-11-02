@@ -1,5 +1,5 @@
 // Free-DAP platform adapter for nice!nano v2 nRF52840.
-// P1.14 SWCLK ; P1.13 SWDIO (bidirectional), fixed GPIO indices.
+// P1.12 SWCLK ; P1.14 SWDIO (bidirectional), fixed GPIO indices.
 // External RP2040 powered separately/shared common 3.3 V rail and GND.
 // License of dap.c/dap.h: BSD-3-Clause. This adapter: MIT.
 #ifndef XIAO_NRF52840_DAP_CONFIG_H
@@ -24,8 +24,8 @@
 #define DAP_CONFIG_DELAY_CONSTANT      5000
 #define DAP_CONFIG_FAST_CLOCK          20000000
 
-#define SWCLK_MASK (1UL << 14) // SWCLK physical = nRF P1.14
-#define SWDIO_MASK (1UL << 13) // SWDIO physical = nRF P1.13
+#define SWCLK_MASK (1UL << 12) // SWCLK physical = nRF P1.12
+#define SWDIO_MASK (1UL << 14) // SWDIO physical = nRF P1.14
 
 static inline void DAP_CONFIG_SWCLK_TCK_write(int v) { if(v) NRF_P1->OUTSET=SWCLK_MASK; else NRF_P1->OUTCLR=SWCLK_MASK; }
 static inline void DAP_CONFIG_SWDIO_TMS_write(int v) { if(v) NRF_P1->OUTSET=SWDIO_MASK; else NRF_P1->OUTCLR=SWDIO_MASK; }
@@ -51,7 +51,7 @@ static inline void DAP_CONFIG_SWDIO_TMS_out(void) {
 
 static inline void DAP_CONFIG_SETUP(void) {
   NRF_P1->DIRCLR = SWCLK_MASK | SWDIO_MASK;
-  NRF_P1->PIN_CNF[13] = (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos);
+  NRF_P1->PIN_CNF[12] = (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos);
   NRF_P1->PIN_CNF[14] = (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos);
   NRF_P1->OUTSET = SWCLK_MASK | SWDIO_MASK;
 }
