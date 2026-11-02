@@ -19,6 +19,8 @@ jobs:
           arduino-cli core update-index --additional-urls "$IDX,$SEEED"
           arduino-cli core install Seeeduino:nrf52 --additional-urls "$IDX,$SEEED"
           arduino-cli core install 'nRFMicro:nrf52@1.0.2' --additional-urls "$IDX,$SEEED"
+      - name: Install Adafruit nrfutil
+        run: pipx install adafruit-nrfutil
       - name: Compile
         run: |
           arduino-cli compile --fqbn 'nRFMicro:nrf52:nicenanov2:softdevice=s140v6' --build-property build.ldscript=nrf52840_s140_v6.ld --output-dir build_nicenano_i2c NICENANO_I2C_DIAG
