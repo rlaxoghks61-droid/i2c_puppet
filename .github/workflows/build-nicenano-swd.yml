@@ -14,17 +14,17 @@ jobs:
       - name: Install nice nano Arduino core
         run: |
           set -euo pipefail
-          IDX='https://raw.githubusercontent.com/pdcook/nRFMicro-Arduino-Core/main/package_nRFMicro_index.json'
+          IDX='https://raw.githubusercontent.com/rlaxoghks61-droid/i2c_puppet/NICENANO_V2_SWD_PROGRAMMER/NICENANO_V2_SWD/package_nRFMicro_fixed_index.json'
           SEEED='https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json'
           arduino-cli core update-index --additional-urls "$IDX,$SEEED"
           arduino-cli core install Seeeduino:nrf52 --additional-urls "$IDX,$SEEED"
-          arduino-cli core install 'nRFMicro-like Boards:nrf52@1.0.2' --additional-urls "$IDX,$SEEED"
+          arduino-cli core install 'nRFMicro:nrf52@1.0.2' --additional-urls "$IDX,$SEEED"
           arduino-cli board listall 'nice!nano v2'
       - name: Install Adafruit nrfutil
         run: pipx install adafruit-nrfutil
       - name: Compile using S140 6.1.1 layout
         run: |
-          arduino-cli compile --fqbn 'nRFMicro-like Boards:nrf52:nicenanov2:softdevice=s140v6' --build-property 'build.ldscript=nrf52840_s140_v6.ld' --output-dir build_nicenano_swd NICENANO_V2_SWD
+          arduino-cli compile --fqbn 'nRFMicro:nrf52:nicenanov2:softdevice=s140v6' --build-property 'build.ldscript=nrf52840_s140_v6.ld' --output-dir build_nicenano_swd NICENANO_V2_SWD
       - name: Generate and validate UF2
         run: |
           set -euo pipefail
