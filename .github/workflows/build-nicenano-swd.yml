@@ -1,0 +1,48 @@
+name: Build nice nano v2 CMSIS-DAP UF2
+on:
+  push:
+    paths:
+      - 'NICENANO_V2_SWD/**'
+      - '.github/workflows/build-nicenano-swd.yml'
+  workflow_dispatch:
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install nice nano Arduino core
+        run: |
+          set -euo pipefail
+          IDX='https://raw.githubusercontent.com/pdcook/nRFMicro-Arduino-Core/main/package_nRFMicro_index.json'
+          SEEED='https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json'
+          arduino-cli core update-index --additional-urls "$IDX,$SEEED"
+          arduino-cli core install Seeeduino:nrf52 --additional-urls "$IDX,$SEEED"
+          arduino-cli core install 'nRFMicro-like Boards:nrf52@1.0.2' --additional-urls "$IDX,$SEEED"
+          arduino-cli board listall 'nice!nano v2'
+      - name: Install Adafruit nrfutil
+        run: pipx install adafruit-nrfutil
+      - name: Compile using S140 6.1.1 layout
+        run: |
+          arduino-cli compile --fqbn 'nRFMicro-like Boards:nrf52:nicenanov2:softdevice=s140v6' --build-property 'build.ldscript=nrf52840_s140_v6.ld' --output-dir build_nicenano_swd NICENANO_V2_SWD
+      - name: Generate and validate UF2
+        run: |
+          set -euo pipefail
+          CONVERTER=$(find ~/.arduino15/packages -path '*/tools/uf2conv/uf2conv.py' -print -quit)
+          test -n "$CONVERTER"
+          python3 "$CONVERTER" -c -f 0xADA52840 -o build_nicenano_swd/NICENANO_V2_CMSIS_DAP.uf2 build_nicenano_swd/NICENANO_V2_SWD.ino.hex
+          python3 - <<'PY'
+          import struct
+          s=open('build_nicenano_swd/NICENANO_V2_CMSIS_DAP.uf2','rb').read()
+          assert s and len(s)%512==0
+          h=[struct.unpack_from('<8I',s,i) for i in range(0,len(s),512)]
+          assert min(x[3] for x in h)==0x26000
+          assert all(x[0]==0x0A324655 and x[1]==0x9E5D5157 and x[7]==0xADA52840 for x in h)
+          print('UF2 OK:',len(h),'blocks')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NICENANO-V2-CMSIS-DAP-UF2
+          path: |
+            build_nicenano_swd/NICENANO_V2_CMSIS_DAP.uf2
+            build_nicenano_swd/NICENANO_V2_SWD.ino.hex
