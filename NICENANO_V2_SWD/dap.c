@@ -407,6 +407,9 @@ static int dap_swd_operation(int req, uint32_t *data)
   else
   {
     dap_swj_run(dap_swd_turnaround + 32 + 1);
+    // Invalid ACK: SWDIO was switched to input for ACK sampling.
+    // Always restore output drive before retries or SWJ sequences.
+    DAP_CONFIG_SWDIO_TMS_out();
   }
 
   DAP_CONFIG_SWDIO_TMS_write(1);
@@ -1196,6 +1199,10 @@ static void dap_swj_clock(void)
 static void dap_swj_sequence(void)
 {
   int size = dap_req_get_byte();
+
+  // SWJ wake-up/reset sequences must always actively drive SWDIO.
+  // A previous failed SWD transfer may have released the pin.
+  DAP_CONFIG_SWDIO_TMS_out();
 
   while (size)
   {

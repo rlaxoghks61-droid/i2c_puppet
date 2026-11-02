@@ -17,7 +17,7 @@
 #define DAP_CONFIG_PRODUCT_STR         "nice!nano v2 CMSIS-DAP"
 #define DAP_CONFIG_SER_NUM_STR         "NICENANO-SWD-01"
 #define DAP_CONFIG_CMSIS_DAP_VER_STR   "1.3.0"
-#define DAP_CONFIG_FW_VER_STR          "0.1.0"
+#define DAP_CONFIG_FW_VER_STR          "0.1.1"
 
 // Calibrating timing in software is hardware/core dependent: deliberately slow.
 #define DAP_CONFIG_PERFORMANCE_ATTR
