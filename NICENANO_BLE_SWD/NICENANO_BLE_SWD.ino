@@ -314,10 +314,10 @@ void updateKey(uint8_t mod, uint8_t key, uint8_t state) {
 }
 
 int8_t scaledAxis(int8_t raw, int16_t &rem) {
-  int16_t v = int16_t(raw) * 3 + rem;
-  int16_t out = v / 2; // 1.5x raw; previously 0.75x
+  int16_t v = int16_t(raw); // 1.0x raw touchpad motion
+  int16_t out = v;
 
-  rem = v - out * 2;
+  rem = 0;
 
   return (int8_t)constrain(out, -127, 127);
 }
@@ -477,7 +477,7 @@ void setup() {
   startAdv();
 
   Serial.println("BLE HID + USB CMSIS-DAP initialized");
-  Serial.println("FAST_MOUSE: 1.5x motion, 8ms TX, packet logging off (send v to toggle)");
+  Serial.println("FAST_MOUSE: 1.0x motion, 8ms TX, packet logging off (send v to toggle)");
   Serial.println("I2C SDA=P0.04 SCL=P1.15 INT=P1.13; SWDIO=P1.14 SWCLK=P1.12");
 }
 
