@@ -24,7 +24,8 @@ extern "C" {
 #define BBQ_EVENT_REG 0x70
 
 
-#define TX_INTERVAL_MS 8
+#define KEYBOARD_INTERVAL_MS 8
+#define MOUSE_USB_INTERVAL_MS 8
 #define IDLE_I2C_POLL_MS 12
 
 // User-confirmed actual GPIO mapping: SDA=P0.04, SCL=P1.15, INT=P1.13.
@@ -311,7 +312,14 @@ bool keyboardDirty = true;
 bool mouseDirty = true;
 bool consumerDirty = true;
 
-uint32_t lastTx = 0;
+// Independent pacing for keyboard, mouse and consumer reports.
+uint32_t lastKeyboardTx = 0;
+uint32_t lastMouseTx = 0;
+uint32_t lastConsumerTx = 0;
+bool keyboardTxSent = false;
+bool mouseTxSent = false;
+bool consumerTxSent = false;
+uint8_t nextHidLane = 0;
 uint32_t lastI2CPoll = 0;
 uint32_t languageReleaseAt = 0;
 
@@ -370,7 +378,9 @@ static void updateOutputRoute() {
   keyboardResyncNeeded=true;
   mouseDirty=true;
   consumerDirty=true;
-  lastTx=0;
+  lastKeyboardTx=lastMouseTx=lastConsumerTx=0;
+  keyboardTxSent=mouseTxSent=consumerTxSent=false;
+  nextHidLane=0;
 }
 
 static void releaseBleHostOnUsbSwitch() {
@@ -575,6 +585,9 @@ void setup() {
   startCMSIS();
   beginBBQI2C();
 
+  // Three SoftDevice notification slots; HID reports share one BLE radio.
+  Bluefruit.configPrphConn(BLE_GATT_ATT_MTU_DEFAULT, 6, 3,
+                            BLE_GATTC_WRITE_CMD_TX_QUEUE_SIZE_DEFAULT);
   Bluefruit.begin();
   Bluefruit.setName("BBQ20KBD Bridge");
   Bluefruit.setTxPower(-4);
@@ -593,130 +606,150 @@ void setup() {
 
 }
 
+static uint32_t negotiatedBleIntervalMs() {
+  BLEConnection* conn = Bluefruit.Connection(Bluefruit.connHandle());
+  if (!conn || !conn->connected()) return 15;
+  const uint16_t units = conn->getConnectionInterval();
+  if (units < 6 || units > 3200) return 15;
+  return ((uint32_t)units * 5UL + 3UL) / 4UL;
+}
+
+// No fixed report-count cap. The keyboard and mouse are paced separately
+// according to the negotiated BLE interval and the transport in use.
+static uint32_t keyboardPacingMs() {
+  if (activeRoute != ROUTE_BLE) return KEYBOARD_INTERVAL_MS;
+  const uint32_t halfInterval=(negotiatedBleIntervalMs()+1UL)/2UL;
+  return halfInterval>KEYBOARD_INTERVAL_MS ? halfInterval : KEYBOARD_INTERVAL_MS;
+}
+
+static void onReportSent(uint32_t now,uint32_t& lastSent,bool& hasSent) {
+  lastSent=now;
+  hasSent=true;
+}
+static bool laneDue(uint32_t now,uint32_t lastSent,bool hasSent,uint32_t interval) {
+  return !hasSent || (uint32_t)(now-lastSent)>=interval;
+}
+
+static bool serviceKeyboardLane(uint32_t now) {
+  if (!laneDue(now,lastKeyboardTx,keyboardTxSent,keyboardPacingMs())) return false;
+  if (routeReleasePending) {
+    uint8_t emptyKeys[6]={0};
+    if (sendKeyboardToHost(0,emptyKeys)) {
+      routeReleasePending=false;
+      onReportSent(millis(),lastKeyboardTx,keyboardTxSent);
+    }
+    return true;
+  }
+  if (navPulsePressed) {
+    if (sendKeyboardToHost(effectiveMods(),keys)) {
+      navPulsePressed=false;
+      navTail=(uint8_t)((navTail+1)%NAV_Q_SIZE);
+      keyboardResyncNeeded=true;
+      onReportSent(millis(),lastKeyboardTx,keyboardTxSent);
+    }
+    return true;
+  }
+  if (navTail!=navHead) {
+    uint8_t navKeys[6]={navQueue[navTail],0,0,0,0,0};
+    if (sendKeyboardToHost(effectiveMods(),navKeys)) {
+      navPulsePressed=true;
+      onReportSent(millis(),lastKeyboardTx,keyboardTxSent);
+    }
+    return true;
+  }
+  if (languageCombo) {
+    uint8_t languageKeys[6]={0x2C,0,0,0,0,0};
+    if ((int32_t)(now-languageReleaseAt)<0) {
+      if (sendKeyboardToHost(0x02,languageKeys))
+        onReportSent(millis(),lastKeyboardTx,keyboardTxSent);
+      return true;
+    }
+    languageCombo=false;
+    keyboardDirty=true;
+  }
+  if (keyFrameCount) {
+    KeyFrame &frame=keyFrames[keyFrameHead];
+    if (sendKeyboardToHost(frame.mod,frame.key)) {
+      keyFrameHead=(uint8_t)((keyFrameHead+1)%KEY_FRAME_CAP);
+      keyFrameCount--;
+      keyboardDirty=false;
+      keyboardResyncNeeded=false;
+      onReportSent(millis(),lastKeyboardTx,keyboardTxSent);
+    }
+    return true;
+  }
+  if (keyboardResyncNeeded || keyboardDirty) {
+    if (sendKeyboardToHost(effectiveMods(),keys)) {
+      keyboardResyncNeeded=false;
+      keyboardDirty=false;
+      onReportSent(millis(),lastKeyboardTx,keyboardTxSent);
+    }
+    return true;
+  }
+  return false;
+}
+
+static bool serviceMouseLane(uint32_t now) {
+  if (!mouseDirty) return false;
+  const uint32_t interval=(activeRoute==ROUTE_BLE)
+      ? negotiatedBleIntervalMs() : MOUSE_USB_INTERVAL_MS;
+  if (!laneDue(now,lastMouseTx,mouseTxSent,interval)) return false;
+  const int8_t dx=(int8_t)constrain(pendingX,-127,127);
+  const int8_t dy=(int8_t)constrain(pendingY,-127,127);
+  if (sendMouseToHost(mouseButtons,dx,dy)) {
+    pendingX-=dx;
+    pendingY-=dy;
+    mouseDirty=(pendingX!=0 || pendingY!=0);
+    onReportSent(millis(),lastMouseTx,mouseTxSent);
+  }
+  return true;
+}
+
+static bool serviceConsumerLane(uint32_t now) {
+  if (!consumerDirty ||
+      !laneDue(now,lastConsumerTx,consumerTxSent,keyboardPacingMs())) return false;
+  if (sendConsumerToHost(consumerUsage)) {
+    consumerDirty=false;
+    onReportSent(millis(),lastConsumerTx,consumerTxSent);
+  }
+  return true;
+}
+
 void loop() {
   serviceCMSIS();
   serviceBalancedBleProfile();
   updateOutputRoute();
   releaseBleHostOnUsbSwitch();
-  // Drain queued packets immediately when INT is asserted; fall back to a bounded periodic poll.
-  if (!swdActive && (readBBQINT() == LOW || (uint32_t)(millis()-lastI2CPoll) >= IDLE_I2C_POLL_MS)) {
-    lastI2CPoll = millis();
+  if (!swdActive && (readBBQINT()==LOW ||
+      (uint32_t)(millis()-lastI2CPoll)>=IDLE_I2C_POLL_MS)) {
+    lastI2CPoll=millis();
     serviceInput();
   }
-
   if (!inputAvailable()) {
-    keyboardDirty = true;
-    mouseDirty = true;
-    consumerDirty = true;
-
-    pendingX = 0;
-    pendingY = 0;
-    navTail = navHead;
-    navPulsePressed = false;
+    keyboardDirty=true;
+    mouseDirty=true;
+    consumerDirty=true;
+    pendingX=pendingY=0;
+    navTail=navHead;
+    navPulsePressed=false;
     keyFrameHead=keyFrameTail=keyFrameCount=0;
     keyboardResyncNeeded=true;
-
     delay(2);
     return;
   }
-
-  uint32_t now = millis();
-
-  if (now - lastTx < TX_INTERVAL_MS) {
-    delay(1);
-    return;
-  }
-
-  // First report to a newly active USB/BLE host must be a neutral report.
-  // This protects against a key repeat storm caused by a stale pressed HID state.
-  if (routeReleasePending) {
-    uint8_t emptyKeys[6]={0};
-    if (sendKeyboardToHost(0,emptyKeys)) {
-      routeReleasePending=false;
-      lastTx=now;
-    }
-    return;
-  }
-
-  // Emit independent BLE reports for arrow press and release.
-  if (navPulsePressed) {
-    if (sendKeyboardToHost(effectiveMods(), keys)) {
-      navPulsePressed = false;
-      navTail = (uint8_t)((navTail + 1) % NAV_Q_SIZE);
-      keyboardResyncNeeded = true;
-      lastTx = now;
-    }
-    return;
-  }
-  if (navTail != navHead) {
-    uint8_t navKeys[6] = { navQueue[navTail], 0, 0, 0, 0, 0 };
-    if (sendKeyboardToHost(effectiveMods(), navKeys)) {
-      navPulsePressed = true;
-      lastTx = now;
-    }
-    return;
-  }
-
-  if (languageCombo) {
-    uint8_t languageKeys[6] = {0x2C,0,0,0,0,0};
-
-    if ((int32_t)(now - languageReleaseAt) < 0) {
-      if (sendKeyboardToHost(0x02, languageKeys)) {
-        lastTx = now;
-      }
+  const uint32_t now=millis();
+  for(uint8_t offset=0;offset<3;++offset) {
+    const uint8_t lane=(uint8_t)((nextHidLane+offset)%3);
+    const bool attempted=(lane==0) ? serviceKeyboardLane(now) :
+                         (lane==1) ? serviceMouseLane(now) : serviceConsumerLane(now);
+    // One BLE notification attempt per pass avoids chained 100ms waits;
+    // USB lanes may run independently during the same pass.
+    if(activeRoute==ROUTE_BLE && attempted) {
+      nextHidLane=(uint8_t)((lane+1)%3);
+      delay(1);
       return;
     }
-
-    languageCombo = false;
-    keyboardDirty = true;
   }
-
-  if (keyFrameCount) {
-    KeyFrame &frame=keyFrames[keyFrameHead];
-    if (sendKeyboardToHost(frame.mod, frame.key)) {
-      keyFrameHead=(uint8_t)((keyFrameHead+1)%KEY_FRAME_CAP);
-      keyFrameCount--;
-      keyboardDirty=false;
-      keyboardResyncNeeded=false;
-      lastTx=now;
-    }
-    return;
-  }
-  if (keyboardResyncNeeded || keyboardDirty) {
-    if (sendKeyboardToHost(effectiveMods(), keys)) {
-      keyboardResyncNeeded=false;
-      keyboardDirty=false;
-      lastTx=now;
-    }
-    return;
-  }
-
-  if (consumerDirty) {
-    if (sendConsumerToHost(consumerUsage)) {
-      consumerDirty = false;
-      lastTx = now;
-    }
-    return;
-  }
-
-  if (mouseDirty) {
-    int8_t dx = (int8_t)constrain(
-      pendingX, -127, 127
-    );
-
-    int8_t dy = (int8_t)constrain(
-      pendingY, -127, 127
-    );
-
-    if (sendMouseToHost(mouseButtons, dx, dy)) {
-      pendingX -= dx;
-      pendingY -= dy;
-
-      mouseDirty = (
-        pendingX != 0 || pendingY != 0
-      );
-
-      lastTx = now;
-    }
-  }
+  nextHidLane=(uint8_t)((nextHidLane+1)%3);
+  delay(1);
 }
