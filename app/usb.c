@@ -286,13 +286,19 @@ static void key_cb(char key, enum key_state state)
 	uint8_t ukey = (uint8_t)key;
 
 	bool no_host_modifier = false;
+	const bool word_delete = alt_pressed && key == '\b';
 
-	// Backspace must stay clean even when ALT/SHIFT are physically held.
-	// Android can ignore/consume modified Backspace in some keyboard layouts.
-	if (key == '\b')
+	// Normal Backspace stays unmodified for Android compatibility.
+	// ALT+Backspace is explicitly converted to Ctrl+Backspace (delete word).
+	if (key == '\b' && !word_delete)
 		no_host_modifier = true;
 
-	if (alt_pressed && key == '\n')
+	if (word_delete)
+	{
+		esp_modifier = KEYBOARD_MODIFIER_LEFTCTRL;
+		esp_keycode = HID_KEY_BACKSPACE;
+	}
+	else if (alt_pressed && key == '\n')
 	{
 		esp_modifier = KEYBOARD_MODIFIER_LEFTALT;
 		esp_keycode = HID_KEY_ENTER;
@@ -310,7 +316,7 @@ static void key_cb(char key, enum key_state state)
 		esp_keycode = conv_table[ukey][1];
 	}
 
-	if (!no_host_modifier && esp_keycode != 0)
+	if (!no_host_modifier && !word_delete && esp_keycode != 0)
 	{
 		if (shl_pressed)
 			esp_modifier |= KEYBOARD_MODIFIER_LEFTSHIFT;
