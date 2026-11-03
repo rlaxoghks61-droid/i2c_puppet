@@ -307,6 +307,11 @@ int16_t mouseRemY = 0;
 int32_t pendingX = 0;
 int32_t pendingY = 0;
 
+// Rate-limit BLE mouse notifications to the negotiated connection interval.
+// Movement continues to accumulate locally between radio opportunities.
+uint32_t lastBleMouseReportMs = 0;
+bool bleMouseReportSent = false;
+
 bool keyboardDirty = true;
 bool mouseDirty = true;
 bool consumerDirty = true;
@@ -366,6 +371,8 @@ static void updateOutputRoute() {
   navPulsePressed=false;
   languageCombo=false;
   pendingX=pendingY=0;
+  lastBleMouseReportMs=0;
+  bleMouseReportSent=false;
   keyboardDirty=true;
   keyboardResyncNeeded=true;
   mouseDirty=true;
@@ -700,6 +707,18 @@ void loop() {
   }
 
   if (mouseDirty) {
+    const bool bleMouseRoute = (activeRoute == ROUTE_BLE);
+    if (bleMouseRoute) {
+      BLEConnection* conn = Bluefruit.Connection(Bluefruit.connHandle());
+      if (conn && conn->connected()) {
+        // BLE time units are 1.25 ms. Add 1 ms so repeated notifications
+        // cannot build a steadily growing backlog in the SoftDevice queue.
+        const uint32_t intervalMs =
+            ((uint32_t)conn->getConnectionInterval() * 5UL + 3UL) / 4UL + 1UL;
+        if (bleMouseReportSent &&
+            (uint32_t)(now - lastBleMouseReportMs) < intervalMs) return;
+      }
+    }
     int8_t dx = (int8_t)constrain(
       pendingX, -127, 127
     );
@@ -709,6 +728,10 @@ void loop() {
     );
 
     if (sendMouseToHost(mouseButtons, dx, dy)) {
+      if (bleMouseRoute) {
+        lastBleMouseReportMs = now;
+        bleMouseReportSent = true;
+      }
       pendingX -= dx;
       pendingY -= dy;
 
