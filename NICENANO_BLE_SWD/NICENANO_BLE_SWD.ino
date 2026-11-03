@@ -9,7 +9,6 @@
  * I2C address: 0x1F
  * Event register: 0x70
  *
- * Serial diagnostic: 115200 baud
  */
 
 #include <Arduino.h>
@@ -21,20 +20,12 @@ extern "C" {
 #include <Adafruit_TinyUSB.h>
 #include <bluefruit.h>
 
-// Android-oriented USB profile. 1 = no CDC serial interface, keep USB HID
-// keyboard/mouse/consumer and CMSIS-DAP HID. 0 = full debugging profile
-// including CDC serial diagnostics. This reduces USB interface exposure but
-// cannot override Android apps whose USB filter matches every device.
-#define BBQ_USB_CLEAN_HID_DAP 1
-
 #define BBQ_ADDR 0x1F
 #define BBQ_EVENT_REG 0x70
 
 
-#define I2C_HZ 100000
 #define TX_INTERVAL_MS 8
 #define IDLE_I2C_POLL_MS 12
-#define DIAG_INTERVAL_MS 1000
 
 // User-confirmed actual GPIO mapping: SDA=P0.04, SCL=P1.15, INT=P1.13.
 // Nordic TWIM PSEL needs port bit 5 for P1.xx pins (0x20 | pin).
@@ -52,20 +43,10 @@ static void configurePhysicalInputPullup(uint8_t physicalPin) {
       (GPIO_PIN_CNF_SENSE_Disabled << GPIO_PIN_CNF_SENSE_Pos);
 }
 
-static void configurePhysicalI2CPin(uint8_t physicalPin) {
-  NRF_P0->PIN_CNF[physicalPin] =
-      (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
-      (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
-      (GPIO_PIN_CNF_PULL_Pullup << GPIO_PIN_CNF_PULL_Pos) |
-      (GPIO_PIN_CNF_DRIVE_S0D1 << GPIO_PIN_CNF_DRIVE_Pos) |
-      (GPIO_PIN_CNF_SENSE_Disabled << GPIO_PIN_CNF_SENSE_Pos);
-}
-
-static const uint8_t SDA_GPIO=BBQ_PHYS_SDA, SCL_GPIO=BBQ_PHYS_SCL, INT_GPIO=BBQ_PHYS_INT;
+static const uint8_t SDA_GPIO=BBQ_PHYS_SDA, SCL_GPIO=BBQ_PHYS_SCL;
 static const uint8_t I2C_ADDR=BBQ_ADDR;
 static const uint32_t I2C_TIMEOUT_US=20000UL;
 static volatile bool swdActive=false;
-static uint32_t twimErrors=0, twimTimeouts=0, twimOkay=0, twimIdleFails=0;
 static bool pinHigh(uint8_t p) { return p==SCL_GPIO ? !!(NRF_P1->IN & (1UL << p)) : !!(NRF_P0->IN & (1UL << p)); }
 
 static void configureI2CPin(uint8_t p) {
@@ -88,14 +69,9 @@ static void startTWIM() {
   NRF_TWIM0->ENABLE = (TWIM_ENABLE_ENABLE_Enabled << TWIM_ENABLE_ENABLE_Pos);
 }
 
-// Keep nRF completely passive on both I2C lines (no TWIM signal generation).
-
-// Diagnostic errors:
-// 0=success, 2=address NACK, 3=data NACK, 4=other ERROR,
-// -20=bus not idle, -21=transaction timed out, -22=short RX.
+// Timeout recovery must reset the TWIM peripheral before the next read.
 static int readRegBounded(uint8_t reg, uint8_t *buf, uint8_t len) {
   if (!pinHigh(SDA_GPIO) || !pinHigh(SCL_GPIO)) {
-    twimIdleFails++;
     return -20;
   }
   NRF_TWIM_Type *t = NRF_TWIM0;
@@ -137,14 +113,12 @@ static int readRegBounded(uint8_t reg, uint8_t *buf, uint8_t len) {
   else if (amount != len) status=-22;
   if (status != 0) {
     if (status==-21) {
-      twimTimeouts++;
       t->TASKS_STOP=1;
       uint32_t startStop=micros();
       while(!t->EVENTS_STOPPED && (uint32_t)(micros()-startStop)<2000UL) {}
     }
     startTWIM(); // Reset TWIM peripheral state before next probe.
-    twimErrors++;
-  } else twimOkay++;
+  }
   return status;
 }
 
@@ -159,13 +133,12 @@ static uint8_t readBBQINT() {
 }
 
 
-// CMSIS-DAP v1 USB HID, independent of Bluetooth LE HID.
+// CMSIS-DAP v1 USB HID, separate from the keyboard/mouse HID interface.
 static uint8_t const cmsis_dap_descriptor[] = {
   0x06,0x00,0xFF,0x09,0x01,0xA1,0x01,
   0x15,0x00,0x26,0xFF,0x00,0x75,0x08,0x95,0x40,
   0x09,0x01,0x81,0x02,0x95,0x40,0x09,0x01,0x91,0x02,0xC0
 };
-// Two independent USB HID interfaces: CMSIS-DAP (vendor HID) + input HID.
 Adafruit_USBD_HID cmsis_hid;
 
 enum { USB_RID_KEYBOARD = 1, USB_RID_MOUSE = 2, USB_RID_CONSUMER = 3 };
@@ -192,25 +165,18 @@ static void dapReceive(uint8_t report_id, hid_report_type_t report_type,
 }
 
 static void startCMSIS() {
-#if BBQ_USB_CLEAN_HID_DAP
-  // The nRF52 core starts TinyUSB with a CDC serial interface by default.
-  // Disconnect it and rebuild the USB configuration without CDC. Serial.end()
-  // clears the configuration and returns the device class to per-interface 0,
-  // unlike the composite 0xEF class set when CDC is active.
+  // Rebuild USB without CDC; keep both the input HID and CMSIS-DAP HID.
   TinyUSBDevice.detach();
   Serial.end();
   delay(30);
-#endif
   TinyUSBDevice.setManufacturerDescriptor("BBQ20KBD");
   TinyUSBDevice.setProductDescriptor("BBQ20 Keyboard Mouse + DAP");
 
-  // Put the native keyboard/mouse HID first to make it the primary interface.
   usb_input_hid.setReportDescriptor(usb_input_descriptor, sizeof(usb_input_descriptor));
   usb_input_hid.setStringDescriptor("BBQ20 Keyboard Mouse Consumer");
   usb_input_hid.setPollInterval(2);
   usb_input_hid.begin();
 
-  // Keep CMSIS-DAP SWD, exposed as a *second HID interface* (not CDC).
   cmsis_hid.setReportDescriptor(cmsis_dap_descriptor,sizeof(cmsis_dap_descriptor));
   cmsis_hid.setStringDescriptor("CMSIS-DAP");
   cmsis_hid.setPollInterval(1);
@@ -219,15 +185,7 @@ static void startCMSIS() {
   cmsis_hid.begin();
   dap_init();
 
-#if BBQ_USB_CLEAN_HID_DAP
   TinyUSBDevice.attach();
-#else
-  if(TinyUSBDevice.mounted()) {
-    TinyUSBDevice.detach();
-    delay(50);
-    TinyUSBDevice.attach();
-  }
-#endif
 }
 
 static void serviceCMSIS() {
@@ -259,11 +217,9 @@ static constexpr uint16_t BLE_PROFILE_MIN_UNITS = 9;
 static constexpr uint16_t BLE_PROFILE_MAX_UNITS = 12;
 static constexpr uint16_t BLE_PROFILE_SLAVE_LATENCY = 2;
 static constexpr uint16_t BLE_PROFILE_TIMEOUT_UNITS = 300; // 3s in 10ms units
-static bool bleProfileConfigured = false;
 static bool wasBleConnected = false;
 static uint32_t bleConnectedAt = 0;
 static bool bleParamAttempted = false;
-static bool bleParamRequestOK = false;
 static uint32_t lastPhysicalInputMs = 0;
 
 static void serviceBalancedBleProfile() {
@@ -272,7 +228,6 @@ static void serviceBalancedBleProfile() {
     wasBleConnected = connected;
     bleConnectedAt = millis();
     bleParamAttempted = false;
-    bleParamRequestOK = false;
   }
   // Do not renegotiate BLE parameters during the first seconds of typing.
   // The advertised 11.25-15ms / latency 2 profile is still applied immediately.
@@ -288,7 +243,6 @@ static void serviceBalancedBleProfile() {
       currentInterval <= BLE_PROFILE_MAX_UNITS &&
       currentLatency == BLE_PROFILE_SLAVE_LATENCY) {
     bleParamAttempted = true;
-    bleParamRequestOK = true;
     return;
   }
   // Once per BLE connection; do not spam parameter updates and disrupt HID.
@@ -297,7 +251,7 @@ static void serviceBalancedBleProfile() {
       (currentInterval >= BLE_PROFILE_MIN_UNITS &&
        currentInterval <= BLE_PROFILE_MAX_UNITS) ? currentInterval : BLE_PROFILE_MAX_UNITS;
   bleParamAttempted = true;
-  bleParamRequestOK = conn->requestConnectionParameter(
+  conn->requestConnectionParameter(
       targetInterval, BLE_PROFILE_SLAVE_LATENCY, BLE_PROFILE_TIMEOUT_UNITS);
 }
 
@@ -328,8 +282,6 @@ static bool sendConsumerToHost(uint16_t usage) {
 }
 
 
-volatile bool irqPending = true; // polling also works without attachInterrupt
-
 uint8_t mods = 0;
 uint8_t keys[6] = {0};
 uint8_t keyMods[6] = {0};
@@ -343,8 +295,6 @@ struct KeyFrame {
 };
 KeyFrame keyFrames[KEY_FRAME_CAP];
 uint8_t keyFrameHead=0, keyFrameTail=0, keyFrameCount=0;
-uint32_t keyFrameOverflows=0;
-uint32_t keyFramesSent=0;
 bool keyboardResyncNeeded=true;
 
 
@@ -363,8 +313,6 @@ bool consumerDirty = true;
 
 uint32_t lastTx = 0;
 uint32_t lastI2CPoll = 0;
-bool verbosePackets = false;
-uint32_t lastDiag = 0;
 uint32_t languageReleaseAt = 0;
 
 bool languageCombo = false;
@@ -374,7 +322,6 @@ bool languageCombo = false;
 enum OutputRoute : uint8_t { ROUTE_NONE=0, ROUTE_BLE=1, ROUTE_USB=2 };
 OutputRoute activeRoute=ROUTE_NONE;
 bool routeReleasePending = false;
-uint32_t routeResetCount = 0;
 bool releaseOldBleKeyboard=false, releaseOldBleMouse=false, releaseOldBleConsumer=false;
 
 
@@ -385,9 +332,6 @@ static constexpr uint8_t NAV_Q_SIZE = 16;
 uint8_t navQueue[NAV_Q_SIZE] = {0};
 uint8_t navHead = 0, navTail = 0;
 bool navPulsePressed = false;
-uint32_t navPulsesSent = 0;
-uint32_t navQueueOverflow = 0;
-uint32_t navSuppressed = 0;
 static constexpr uint32_t NAV_COOLDOWN_MS = 350;
 uint32_t lastNavAcceptedMs = 0;
 bool navAcceptedOnce = false;
@@ -408,7 +352,6 @@ static void updateOutputRoute() {
     releaseOldBleConsumer=false;
   }
   activeRoute=next;
-  routeResetCount++;
   // Both transports use delta events. A missing release on an old connection
   // must NEVER seed a new USB/BLE host with a stuck key.
   mods=0;
@@ -449,29 +392,17 @@ static bool isArrowKey(uint8_t key) {
 static void queueNavKey(uint8_t key) {
   const uint32_t now = millis();
   // No backlog: a long touch must not become a burst of queued arrows.
-  // The RP2040 has its own 350ms gesture cooldown; match the 350ms minimum.
   if ((navAcceptedOnce && (uint32_t)(now - lastNavAcceptedMs) < NAV_COOLDOWN_MS) ||
       navPulsePressed || navHead != navTail) {
-    navSuppressed++;
     return;
   }
   const uint8_t next = (uint8_t)((navHead + 1) % NAV_Q_SIZE);
-  if (next == navTail) { navQueueOverflow++; return; }
   navQueue[navHead] = key;
   navHead = next;
   lastNavAcceptedMs = now;
   navAcceptedOnce = true;
 }
 
-
-// Diagnostic counters
-uint32_t reg70Ok = 0;
-uint32_t reg70Fail = 0;
-uint32_t packetCount = 0;
-
-void onBbqInt() {
-  irqPending = true;
-}
 
 uint8_t effectiveMods() {
   uint8_t m = mods;
@@ -496,7 +427,6 @@ void enqueueCurrentKeyFrame() {
   if (keyFrameCount == KEY_FRAME_CAP) {
     // Avoid sending a stale backlog; recover from current physical state.
     keyFrameHead = keyFrameTail = keyFrameCount = 0;
-    keyFrameOverflows++;
     keyboardResyncNeeded = true;
   }
   keyFrames[keyFrameTail] = frame;
@@ -570,46 +500,14 @@ int8_t scaledAxis(int8_t raw, int16_t &rem) {
 
 
 bool readPacket(uint8_t p[4]) {
-  int err=readRegBounded(BBQ_EVENT_REG,p,4);
-  if(err!=0) {
-    reg70Fail++;
-    static uint32_t logAt=0;
-    if(millis()-logAt >= 1000) {
-      Serial.print("REG70_ERR=");Serial.print(err);
-      Serial.print(" SDA=");Serial.print(pinHigh(BBQ_PHYS_SDA));
-      Serial.print(" SCL=");Serial.println(pinHigh(BBQ_PHYS_SCL));
-      logAt=millis();
-    }
-    return false;
-  }
-  reg70Ok++;
-  return true;
-}
-
-void printPacket(uint8_t p[4]) {
-  Serial.print("PACKET: ");
-
-  for (int i = 0; i < 4; i++) {
-    if (p[i] < 0x10) Serial.print("0");
-    Serial.print(p[i], HEX);
-    Serial.print(" ");
-  }
-
-  Serial.println();
+  return readRegBounded(BBQ_EVENT_REG, p, 4) == 0;
 }
 
 void serviceInput() {
-  // Diagnostic mode:
-  // Poll regardless of INT state.
-  noInterrupts();
-  irqPending = false;
-  interrupts();
-
   for (int i = 0; i < 16; i++) {
     uint8_t p[4];
 
     if (!readPacket(p)) {
-      irqPending = true;
       break;
     }
 
@@ -617,9 +515,7 @@ void serviceInput() {
       break;
     }
 
-    packetCount++;
     lastPhysicalInputMs=millis();
-    if (verbosePackets) printPacket(p);
 
     if (p[0] == 1) {
       updateKey(p[1], p[2], p[3]);
@@ -649,13 +545,6 @@ void serviceInput() {
       consumerDirty = true;
     }
 
-    if (i == 15) {
-      irqPending = true;
-    }
-  }
-
-  if (readBBQINT() == LOW) {
-    irqPending = true;
   }
 }
 
@@ -682,59 +571,9 @@ void startAdv() {
 }
 
 
-void printDiagnostics() {
-  // Avoid formatting and USB CDC writes while operating wirelessly on battery.
-  if (!TinyUSBDevice.mounted() || !Serial) return;
-  if(millis()-lastDiag<DIAG_INTERVAL_MS) return;
-  lastDiag=millis();
-  Serial.print("BLE=");Serial.print(Bluefruit.connected()?1:0);
-  Serial.print(" USB=");Serial.print(TinyUSBDevice.mounted()?1:0);
-  Serial.print(" USB_HID=");Serial.print(usb_input_hid.isValid()?1:0);
-  Serial.print(" OUT=");Serial.print(useUsbInput()?"USB":(Bluefruit.connected()?"BLE":"NONE"));
-  Serial.print(" BLE_PROFILE=");Serial.print(bleProfileConfigured?1:0);
-  Serial.print(" BLE_PARAM_REQ=");Serial.print(bleParamAttempted?1:0);
-  Serial.print(" BLE_PARAM_OK=");Serial.print(bleParamRequestOK?1:0);
-  if (Bluefruit.connected()) {
-    BLEConnection* c = Bluefruit.Connection(Bluefruit.connHandle());
-    if (c && c->connected()) {
-      Serial.print(" BLE_INTERVAL_MS=");Serial.print(c->getConnectionInterval()*1.25f,2);
-      Serial.print(" BLE_LATENCY=");Serial.print(c->getSlaveLatency());
-    }
-  }
-  Serial.print(" SWD=");Serial.print(swdActive?1:0);
-  Serial.print(" REG70_OK=");Serial.print(reg70Ok);
-  Serial.print(" REG70_FAIL=");Serial.print(reg70Fail);
-  Serial.print(" PACKETS=");Serial.print(packetCount);
-  Serial.print(" NAV_SENT=");Serial.print(navPulsesSent);
-  Serial.print(" NAV_Q=");Serial.print((navHead+NAV_Q_SIZE-navTail)%NAV_Q_SIZE);
-  Serial.print(" NAV_OVF=");Serial.print(navQueueOverflow);
-  Serial.print(" NAV_DROP=");Serial.print(navSuppressed);
-  Serial.print(" KEY_Q=");Serial.print(keyFrameCount);
-  Serial.print(" KEY_SENT=");Serial.print(keyFramesSent);
-  Serial.print(" KEY_OVF=");Serial.print(keyFrameOverflows);
-  Serial.print(" ROUTE_RESET=");Serial.print(routeResetCount);
-  Serial.print(" TWIM_OK=");Serial.print(twimOkay);
-  Serial.print(" TWIM_TIMEOUT=");Serial.print(twimTimeouts);
-  Serial.print(" SDA=");Serial.print(pinHigh(BBQ_PHYS_SDA));
-  Serial.print(" SCL=");Serial.print(pinHigh(BBQ_PHYS_SCL));
-  Serial.print(" INT=");Serial.println(readBBQINT());
-}
 void setup() {
   startCMSIS();
-#if !BBQ_USB_CLEAN_HID_DAP
-  Serial.begin(115200);
-  uint32_t usbStart=millis();
-  while(!Serial && (uint32_t)(millis()-usbStart)<1500UL) delay(10);
-#endif
-
   beginBBQI2C();
-  Serial.print("Physical GPIO SDA=P0."); Serial.print(BBQ_PHYS_SDA);
-  Serial.print(" SCL=P1."); Serial.print(BBQ_PHYS_SCL);
-  Serial.print(" INT=P1."); Serial.println(BBQ_PHYS_INT);
-  Serial.print("TWIM0 PSEL SDA="); Serial.print(NRF_TWIM0->PSEL.SDA);
-  Serial.print(" SCL="); Serial.println(NRF_TWIM0->PSEL.SCL);
-
-  Serial.println("BBQ20KBD I2C diagnostic started");
 
   Bluefruit.begin();
   Bluefruit.setName("BBQ20KBD Bridge");
@@ -745,22 +584,13 @@ void setup() {
   bledis.begin();
 
   blehid.begin();
-  // BLEHidAdafruit::begin() already sets 9-12 units; make the profile explicit
-  // after begin() so its default request cannot overwrite our parameters.
-  const bool intervalOK = Bluefruit.Periph.setConnInterval(
-      BLE_PROFILE_MIN_UNITS, BLE_PROFILE_MAX_UNITS);
-  const bool latencyOK = Bluefruit.Periph.setConnSlaveLatency(
-      BLE_PROFILE_SLAVE_LATENCY);
-  const bool timeoutOK = Bluefruit.Periph.setConnSupervisionTimeoutMS(3000);
-  bleProfileConfigured = intervalOK && latencyOK && timeoutOK;
+  // Set connection parameters after BLE HID initialization.
+  Bluefruit.Periph.setConnInterval(BLE_PROFILE_MIN_UNITS, BLE_PROFILE_MAX_UNITS);
+  Bluefruit.Periph.setConnSlaveLatency(BLE_PROFILE_SLAVE_LATENCY);
+  Bluefruit.Periph.setConnSupervisionTimeoutMS(3000);
 
   startAdv();
 
-  Serial.println("USB-FIRST Keyboard/Mouse/Consumer + BLE fallback + USB CMSIS-DAP initialized");
-  Serial.println("BLE balanced: 11.25-15ms, latency=2, supervision=3000ms; no deep sleep");
-  Serial.println("Full keyboard state FIFO 32 (ESP32-style), 0.9x mouse, shorts navigation guard 350ms");
-  Serial.println("MOUSE: 0.9x; shorts navigation no backlog + 350ms guard, no BLE backlog; send v for packet logs");
-  Serial.println("I2C SDA=P0.04 SCL=P1.15 INT=P1.13; SWDIO=P1.14 SWCLK=P1.12");
 }
 
 void loop() {
@@ -772,11 +602,6 @@ void loop() {
   if (!swdActive && (readBBQINT() == LOW || (uint32_t)(millis()-lastI2CPoll) >= IDLE_I2C_POLL_MS)) {
     lastI2CPoll = millis();
     serviceInput();
-  }
-  printDiagnostics();
-  while (Serial.available()) {
-    const char c = (char)Serial.read();
-    if (c == 'v' || c == 'V') { verbosePackets = !verbosePackets; Serial.print("PACKET_LOG="); Serial.println(verbosePackets?1:0); }
   }
 
   if (!inputAvailable()) {
@@ -818,7 +643,6 @@ void loop() {
     if (sendKeyboardToHost(effectiveMods(), keys)) {
       navPulsePressed = false;
       navTail = (uint8_t)((navTail + 1) % NAV_Q_SIZE);
-      navPulsesSent++;
       keyboardResyncNeeded = true;
       lastTx = now;
     }
@@ -852,7 +676,6 @@ void loop() {
     if (sendKeyboardToHost(frame.mod, frame.key)) {
       keyFrameHead=(uint8_t)((keyFrameHead+1)%KEY_FRAME_CAP);
       keyFrameCount--;
-      keyFramesSent++;
       keyboardDirty=false;
       keyboardResyncNeeded=false;
       lastTx=now;
