@@ -504,9 +504,39 @@ void enqueueCurrentKeyFrame() {
   keyFrameCount++;
 }
 
+// Android compatibility: some Android editors delete only one character for
+// Ctrl+Backspace even though the same HID chord deletes a word on Windows.
+// RP2040 encodes physical ALT+Backspace as Ctrl+Backspace (mod=0x01, key=0x2A).
+// Emit two distinct HID strokes instead: select previous word, then delete.
+// Do NOT route the modified arrow through the shorts navigation pulse queue.
+static uint32_t androidWordDeletes = 0;
+static uint32_t androidWordDeleteQueueDrops = 0;
+static void enqueueWordDeleteSequence() {
+  static const uint8_t modsSeq[4] = { 0x03, 0, 0, 0 };  // LCTRL+LSHIFT, none
+  static const uint8_t keySeq[4]  = { 0x50, 0, 0x2A, 0 }; // LEFT, release, BKSP, release
+  if (keyFrameCount > KEY_FRAME_CAP-4) {
+    // Do not issue partial macro sequences: a half sent modifier can stick.
+    androidWordDeleteQueueDrops++;
+    return;
+  }
+  for (uint8_t i=0; i<4; ++i) {
+    KeyFrame &f = keyFrames[keyFrameTail];
+    f.mod = modsSeq[i];
+    memset(f.key, 0, sizeof(f.key));
+    f.key[0] = keySeq[i];
+    keyFrameTail = (uint8_t)((keyFrameTail + 1)%KEY_FRAME_CAP);
+    keyFrameCount++;
+  }
+  androidWordDeletes++;
+}
 void updateKey(uint8_t mod, uint8_t key, uint8_t state) {
   if (state != 1 && state != 3) return;
 
+  if (mod == 0x01 && key == 0x2A) { // Ctrl+Backspace from RP2040 physical ALT+Backspace
+    if (state == 1) enqueueWordDeleteSequence();
+    // A completed tap (press and release) is already represented by the 4 frames.
+    return;
+  }
   if (isArrowKey(key)) {
     if (state == 1) queueNavKey(key);
     return;
@@ -712,6 +742,8 @@ void printDiagnostics() {
   Serial.print(" KEY_Q=");Serial.print(keyFrameCount);
   Serial.print(" KEY_SENT=");Serial.print(keyFramesSent);
   Serial.print(" KEY_OVF=");Serial.print(keyFrameOverflows);
+  Serial.print(" WORD_DEL=");Serial.print(androidWordDeletes);
+  Serial.print(" WORD_DROP=");Serial.print(androidWordDeleteQueueDrops);
   Serial.print(" ROUTE_RESET=");Serial.print(routeResetCount);
   Serial.print(" TWIM_OK=");Serial.print(twimOkay);
   Serial.print(" TWIM_TIMEOUT=");Serial.print(twimTimeouts);
