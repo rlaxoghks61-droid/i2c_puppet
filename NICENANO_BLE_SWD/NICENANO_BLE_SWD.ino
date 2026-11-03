@@ -21,6 +21,12 @@ extern "C" {
 #include <Adafruit_TinyUSB.h>
 #include <bluefruit.h>
 
+// Android-oriented USB profile. 1 = no CDC serial interface, keep USB HID
+// keyboard/mouse/consumer and CMSIS-DAP HID. 0 = full debugging profile
+// including CDC serial diagnostics. This reduces USB interface exposure but
+// cannot override Android apps whose USB filter matches every device.
+#define BBQ_USB_CLEAN_HID_DAP 1
+
 #define BBQ_ADDR 0x1F
 #define BBQ_EVENT_REG 0x70
 
@@ -186,25 +192,42 @@ static void dapReceive(uint8_t report_id, hid_report_type_t report_type,
 }
 
 static void startCMSIS() {
-  TinyUSBDevice.setManufacturerDescriptor("Open CMSIS-DAP");
-  TinyUSBDevice.setProductDescriptor("BBQ20 USB + BLE HID + DAP");
+#if BBQ_USB_CLEAN_HID_DAP
+  // The nRF52 core starts TinyUSB with a CDC serial interface by default.
+  // Disconnect it and rebuild the USB configuration without CDC. Serial.end()
+  // clears the configuration and returns the device class to per-interface 0,
+  // unlike the composite 0xEF class set when CDC is active.
+  TinyUSBDevice.detach();
+  Serial.end();
+  delay(30);
+#endif
+  TinyUSBDevice.setManufacturerDescriptor("BBQ20KBD");
+  TinyUSBDevice.setProductDescriptor("BBQ20 Keyboard Mouse + DAP");
+
+  // Put the native keyboard/mouse HID first to make it the primary interface.
+  usb_input_hid.setReportDescriptor(usb_input_descriptor, sizeof(usb_input_descriptor));
+  usb_input_hid.setStringDescriptor("BBQ20 Keyboard Mouse Consumer");
+  usb_input_hid.setPollInterval(2);
+  usb_input_hid.begin();
+
+  // Keep CMSIS-DAP SWD, exposed as a *second HID interface* (not CDC).
   cmsis_hid.setReportDescriptor(cmsis_dap_descriptor,sizeof(cmsis_dap_descriptor));
   cmsis_hid.setStringDescriptor("CMSIS-DAP");
   cmsis_hid.setPollInterval(1);
   cmsis_hid.enableOutEndpoint(true);
   cmsis_hid.setReportCallback(nullptr,dapReceive);
   cmsis_hid.begin();
-
-  usb_input_hid.setReportDescriptor(usb_input_descriptor, sizeof(usb_input_descriptor));
-  usb_input_hid.setStringDescriptor("BBQ20 Keyboard Mouse Consumer");
-  usb_input_hid.setPollInterval(2);
-  usb_input_hid.begin();
   dap_init();
+
+#if BBQ_USB_CLEAN_HID_DAP
+  TinyUSBDevice.attach();
+#else
   if(TinyUSBDevice.mounted()) {
     TinyUSBDevice.detach();
     delay(50);
     TinyUSBDevice.attach();
   }
+#endif
 }
 
 static void serviceCMSIS() {
@@ -681,9 +704,11 @@ void printDiagnostics() {
 }
 void setup() {
   startCMSIS();
+#if !BBQ_USB_CLEAN_HID_DAP
   Serial.begin(115200);
   uint32_t usbStart=millis();
   while(!Serial && (uint32_t)(millis()-usbStart)<1500UL) delay(10);
+#endif
 
   beginBBQI2C();
   Serial.print("Physical GPIO SDA=P0."); Serial.print(BBQ_PHYS_SDA);
