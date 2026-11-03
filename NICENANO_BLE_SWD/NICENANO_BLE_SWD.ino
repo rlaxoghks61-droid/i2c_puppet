@@ -264,6 +264,7 @@ static bool wasBleConnected = false;
 static uint32_t bleConnectedAt = 0;
 static bool bleParamAttempted = false;
 static bool bleParamRequestOK = false;
+static uint32_t lastPhysicalInputMs = 0;
 
 static void serviceBalancedBleProfile() {
   const bool connected = (Bluefruit.connected() != 0);
@@ -273,7 +274,10 @@ static void serviceBalancedBleProfile() {
     bleParamAttempted = false;
     bleParamRequestOK = false;
   }
-  if (!connected || bleParamAttempted || (uint32_t)(millis()-bleConnectedAt) < 2500UL) return;
+  // Do not renegotiate BLE parameters during the first seconds of typing.
+  // The advertised 11.25-15ms / latency 2 profile is still applied immediately.
+  if (!connected || bleParamAttempted || (uint32_t)(millis()-bleConnectedAt) < 8000UL ||
+      (uint32_t)(millis()-lastPhysicalInputMs) < 1500UL) return;
 
   BLEConnection* conn = Bluefruit.Connection(Bluefruit.connHandle());
   if (!conn || !conn->connected()) return;
@@ -369,6 +373,8 @@ bool languageCombo = false;
 // not a backlog of HID reports prepared for the old connection.
 enum OutputRoute : uint8_t { ROUTE_NONE=0, ROUTE_BLE=1, ROUTE_USB=2 };
 OutputRoute activeRoute=ROUTE_NONE;
+bool routeReleasePending = false;
+uint32_t routeResetCount = 0;
 bool releaseOldBleKeyboard=false, releaseOldBleMouse=false, releaseOldBleConsumer=false;
 
 
@@ -402,6 +408,15 @@ static void updateOutputRoute() {
     releaseOldBleConsumer=false;
   }
   activeRoute=next;
+  routeResetCount++;
+  // Both transports use delta events. A missing release on an old connection
+  // must NEVER seed a new USB/BLE host with a stuck key.
+  mods=0;
+  memset(keys,0,sizeof(keys));
+  memset(keyMods,0,sizeof(keyMods));
+  mouseButtons=0;
+  consumerUsage=0;
+  routeReleasePending=(next!=ROUTE_NONE);
   // Never replay old key taps, directional strokes or mouse motion on a new host.
   keyFrameHead=keyFrameTail=keyFrameCount=0;
   navTail=navHead;
@@ -603,6 +618,7 @@ void serviceInput() {
     }
 
     packetCount++;
+    lastPhysicalInputMs=millis();
     if (verbosePackets) printPacket(p);
 
     if (p[0] == 1) {
@@ -696,6 +712,7 @@ void printDiagnostics() {
   Serial.print(" KEY_Q=");Serial.print(keyFrameCount);
   Serial.print(" KEY_SENT=");Serial.print(keyFramesSent);
   Serial.print(" KEY_OVF=");Serial.print(keyFrameOverflows);
+  Serial.print(" ROUTE_RESET=");Serial.print(routeResetCount);
   Serial.print(" TWIM_OK=");Serial.print(twimOkay);
   Serial.print(" TWIM_TIMEOUT=");Serial.print(twimTimeouts);
   Serial.print(" SDA=");Serial.print(pinHigh(BBQ_PHYS_SDA));
@@ -782,6 +799,17 @@ void loop() {
 
   if (now - lastTx < TX_INTERVAL_MS) {
     delay(1);
+    return;
+  }
+
+  // First report to a newly active USB/BLE host must be a neutral report.
+  // This protects against a key repeat storm caused by a stale pressed HID state.
+  if (routeReleasePending) {
+    uint8_t emptyKeys[6]={0};
+    if (sendKeyboardToHost(0,emptyKeys)) {
+      routeReleasePending=false;
+      lastTx=now;
+    }
     return;
   }
 
