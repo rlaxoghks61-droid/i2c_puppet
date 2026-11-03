@@ -209,8 +209,58 @@ static void serviceCMSIS() {
   }
 }
 
+// The stock Bluefruit notify() waits for an HVN buffer (up to 100ms).
+// Use the existing HID report characteristics with the SoftDevice's
+// immediate-return API instead, so I2C polling never waits for BLE airtime.
+// The Bluefruit HID service and report map remain unchanged.
+class NonBlockingHid : public BLEHidAdafruit {
+public:
+  bool tryKeyboardReport(uint8_t modifier, const uint8_t keycodes[6]) {
+    hid_keyboard_report_t report = {};
+    report.modifier = modifier;
+    memcpy(report.keycode, keycodes, 6);
+    BLECharacteristic* characteristic = isBootMode()
+        ? _chr_boot_keyboard_input : &_chr_inputs[0];
+    return tryNotify(characteristic, &report, sizeof(report));
+  }
+
+  bool tryMouseReport(uint8_t buttons, int8_t x, int8_t y) {
+    hid_mouse_report_t report = {};
+    report.buttons = buttons;
+    report.x = x;
+    report.y = y;
+    BLECharacteristic* characteristic = isBootMode()
+        ? _chr_boot_mouse_input : &_chr_inputs[2];
+    return tryNotify(characteristic, &report, sizeof(report));
+  }
+
+  bool tryConsumerReport(uint16_t usage) {
+    return tryNotify(&_chr_inputs[1], &usage, sizeof(usage));
+  }
+
+private:
+  bool tryNotify(BLECharacteristic* characteristic, const void* report, uint16_t length) {
+    if (!characteristic || !Bluefruit.connected()) return false;
+    const uint16_t connection = Bluefruit.connHandle();
+    if (connection == BLE_CONN_HANDLE_INVALID ||
+        !characteristic->notifyEnabled(connection)) return false;
+
+    uint16_t packetLength = length;
+    const ble_gatts_char_handles_t handles = characteristic->handles();
+    ble_gatts_hvx_params_t params = {};
+    params.handle = handles.value_handle;
+    params.type = BLE_GATT_HVX_NOTIFICATION;
+    params.p_len = &packetLength;
+    params.p_data = (uint8_t*)report;
+
+    // NRF_ERROR_RESOURCES: radio queue full. Return immediately and let the
+    // existing per-lane scheduler retry; no 100ms semaphore wait.
+    return sd_ble_gatts_hvx(connection, &params) == NRF_SUCCESS;
+  }
+};
+
 BLEDis bledis;
-BLEHidAdafruit blehid;
+NonBlockingHid blehid;
 
 // Balanced BLE HID profile: requested 11.25-15ms, slave latency 2,
 // 3s supervision timeout. The central (phone/PC) decides actual parameters.
@@ -269,17 +319,17 @@ static bool inputAvailable() {
 static bool sendKeyboardToHost(uint8_t mod, uint8_t key[6]) {
   if (useUsbInput()) return usb_input_hid.ready() &&
          usb_input_hid.keyboardReport(USB_RID_KEYBOARD, mod, key);
-  return Bluefruit.connected() && blehid.keyboardReport(mod, key);
+  return Bluefruit.connected() && blehid.tryKeyboardReport(mod, key);
 }
 static bool sendMouseToHost(uint8_t buttons, int8_t dx, int8_t dy) {
   if (useUsbInput()) return usb_input_hid.ready() &&
          usb_input_hid.mouseReport(USB_RID_MOUSE,buttons,dx,dy,0,0);
-  return Bluefruit.connected() && blehid.mouseReport(buttons,dx,dy,0,0);
+  return Bluefruit.connected() && blehid.tryMouseReport(buttons,dx,dy);
 }
 static bool sendConsumerToHost(uint16_t usage) {
   if (useUsbInput()) return usb_input_hid.ready() &&
          usb_input_hid.sendReport16(USB_RID_CONSUMER,usage);
-  return Bluefruit.connected() && blehid.consumerReport(usage);
+  return Bluefruit.connected() && blehid.tryConsumerReport(usage);
 }
 
 
@@ -387,11 +437,11 @@ static void releaseBleHostOnUsbSwitch() {
   if (!useUsbInput() || !Bluefruit.connected()) return;
   if (releaseOldBleKeyboard) {
     uint8_t emptyKeys[6]={0};
-    if (blehid.keyboardReport(0,emptyKeys)) releaseOldBleKeyboard=false;
+    if (blehid.tryKeyboardReport(0,emptyKeys)) releaseOldBleKeyboard=false;
   } else if (releaseOldBleMouse) {
-    if (blehid.mouseReport(uint8_t(0),int8_t(0),int8_t(0),int8_t(0),int8_t(0))) releaseOldBleMouse=false;
+    if (blehid.tryMouseReport(0,0,0)) releaseOldBleMouse=false;
   } else if (releaseOldBleConsumer) {
-    if (blehid.consumerReport(0)) releaseOldBleConsumer=false;
+    if (blehid.tryConsumerReport(0)) releaseOldBleConsumer=false;
   }
 }
 
